@@ -1,0 +1,298 @@
+package kubernetes
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/kubesphere/ksctl/pkg/auth"
+	"github.com/kubesphere/ksctl/pkg/config"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
+)
+
+func TestRESTClientGetterBuildsKubeSphereConfig(t *testing.T) {
+	getter := NewRESTClientGetter(&Options{
+		Endpoint:              "https://ks.example.com",
+		Token:                 "secret",
+		Namespace:             "demo",
+		RequestTimeout:        "15s",
+		InsecureSkipTLSVerify: true,
+		NoInteractive:         true,
+		UserAgent:             "ksctl/test",
+	}, Dependencies{})
+
+	restConfig, err := getter.ToRESTConfig()
+	if err != nil {
+		t.Fatalf("ToRESTConfig() error = %v", err)
+	}
+	if restConfig.Host != "https://ks.example.com" {
+		t.Fatalf("Host = %q", restConfig.Host)
+	}
+	if restConfig.BearerToken != "secret" {
+		t.Fatalf("BearerToken = %q", restConfig.BearerToken)
+	}
+	if !restConfig.Insecure {
+		t.Fatal("Insecure = false, want true")
+	}
+	if restConfig.UserAgent != "ksctl/test" {
+		t.Fatalf("UserAgent = %q", restConfig.UserAgent)
+	}
+	if restConfig.Timeout != 15*time.Second {
+		t.Fatalf("Timeout = %v", restConfig.Timeout)
+	}
+
+	namespace, explicit, err := getter.ToRawKubeConfigLoader().Namespace()
+	if err != nil {
+		t.Fatalf("Namespace() error = %v", err)
+	}
+	if namespace != "demo" || !explicit {
+		t.Fatalf("Namespace() = %q, %v", namespace, explicit)
+	}
+}
+
+func TestRESTClientGetterMapsConfigTLSClientConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.New()
+	cfg.CurrentContext = "prod"
+	cfg.Clusters["prod"] = config.Cluster{
+		Host: "https://ks.example.com",
+		TLSClientConfig: config.TLSClientConfig{
+			Insecure:   true,
+			ServerName: "ks.example.com",
+			CAFile:     "/tmp/ca.crt",
+			CAData:     "ca-data",
+		},
+	}
+	cfg.Users["admin"] = config.User{BearerToken: "secret"}
+	cfg.Contexts["prod"] = config.Context{Cluster: "prod", User: "admin"}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	provider := auth.NewProvider(auth.ProviderOptions{CacheDir: filepath.Join(t.TempDir(), "tokens")})
+	getter := NewRESTClientGetter(&Options{
+		ConfigPath:    path,
+		NoInteractive: true,
+	}, Dependencies{TokenProvider: provider})
+
+	restConfig, err := getter.ToRESTConfig()
+	if err != nil {
+		t.Fatalf("ToRESTConfig() error = %v", err)
+	}
+	if restConfig.Host != "https://ks.example.com" || restConfig.BearerToken != "secret" {
+		t.Fatalf("restConfig = %#v", restConfig)
+	}
+	if !restConfig.Insecure || restConfig.ServerName != "ks.example.com" || restConfig.CAFile != "/tmp/ca.crt" || string(restConfig.CAData) != "ca-data" {
+		t.Fatalf("TLSClientConfig = %#v", restConfig.TLSClientConfig)
+	}
+}
+
+func TestRESTClientGetterCachesDiscoveryAndPreservesAPIPaths(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api":
+			writeJSON(t, w, metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"}, Versions: []string{"v1"}})
+		case "/apis":
+			writeJSON(t, w, metav1.APIGroupList{TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"}})
+		case "/api/v1":
+			writeJSON(t, w, metav1.APIResourceList{GroupVersion: "v1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	getter := NewRESTClientGetter(&Options{
+		Endpoint:      server.URL,
+		Token:         "secret",
+		NoInteractive: true,
+	}, Dependencies{})
+
+	first, err := getter.ToDiscoveryClient()
+	if err != nil {
+		t.Fatalf("ToDiscoveryClient() error = %v", err)
+	}
+	second, err := getter.ToDiscoveryClient()
+	if err != nil {
+		t.Fatalf("ToDiscoveryClient() second error = %v", err)
+	}
+	if first != second {
+		t.Fatal("ToDiscoveryClient() did not return the cached client")
+	}
+	if _, err := first.ServerGroups(); err != nil {
+		t.Fatalf("ServerGroups() error = %v", err)
+	}
+	if !slices.Contains(paths, "/api") || !slices.Contains(paths, "/apis") {
+		t.Fatalf("discovery paths = %v", paths)
+	}
+	for _, path := range paths {
+		if path != "/api" && path != "/apis" && !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/apis/") {
+			t.Fatalf("unexpected translated path %q", path)
+		}
+	}
+}
+
+func TestRESTMapperFallsBackToCoreV1Discovery(t *testing.T) {
+	var pathsMu sync.Mutex
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pathsMu.Lock()
+		paths = append(paths, r.URL.Path)
+		pathsMu.Unlock()
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q", got)
+		}
+		switch r.URL.Path {
+		case "/api/v1":
+			w.Header().Set("Content-Type", "application/json")
+			writeJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{{
+					Name:         "nodes",
+					SingularName: "node",
+					Kind:         "Node",
+					Namespaced:   false,
+					Verbs:        metav1.Verbs{"get", "list"},
+				}},
+			})
+		case "/api", "/apis":
+			http.Redirect(w, r, "/login?referer="+r.URL.Path, http.StatusFound)
+		case "/login":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<!doctype html><title>KubeSphere</title>"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	getter := NewRESTClientGetter(&Options{
+		Endpoint:      server.URL,
+		Token:         "secret",
+		NoInteractive: true,
+	}, Dependencies{})
+
+	cachedClient, err := getter.ToDiscoveryClient()
+	if err != nil {
+		t.Fatalf("ToDiscoveryClient() error = %v", err)
+	}
+	_, resources, err := cachedClient.ServerGroupsAndResources()
+	if err != nil {
+		t.Fatalf("ServerGroupsAndResources() error = %v", err)
+	}
+	if len(resources) != 1 || resources[0].GroupVersion != "v1" {
+		t.Fatalf("resources = %#v", resources)
+	}
+
+	mapper, err := getter.ToRESTMapper()
+	if err != nil {
+		t.Fatalf("ToRESTMapper() error = %v", err)
+	}
+	mapping, err := mapper.RESTMapping(schema.GroupKind{Kind: "Node"})
+	if err != nil {
+		t.Fatalf("RESTMapping(Node) error = %v", err)
+	}
+	if mapping.Resource != (schema.GroupVersionResource{Version: "v1", Resource: "nodes"}) {
+		t.Fatalf("Resource = %v", mapping.Resource)
+	}
+	pathsMu.Lock()
+	defer pathsMu.Unlock()
+	if !slices.Contains(paths, "/api/v1") {
+		t.Fatalf("discovery paths = %v, want /api/v1 fallback", paths)
+	}
+}
+
+func TestRESTClientGetterUsesInjectedTransportAsTLSOwner(t *testing.T) {
+	transport := &recordingTransport{}
+	getter := NewRESTClientGetter(&Options{
+		Endpoint:              "https://ks.example.com",
+		Token:                 "secret",
+		InsecureSkipTLSVerify: true,
+		NoInteractive:         true,
+	}, Dependencies{Transport: transport})
+
+	restConfig, err := getter.ToRESTConfig()
+	if err != nil {
+		t.Fatalf("ToRESTConfig() error = %v", err)
+	}
+	if restConfig.Transport != transport {
+		t.Fatalf("Transport = %#v, want injected transport", restConfig.Transport)
+	}
+	if !reflect.DeepEqual(restConfig.TLSClientConfig, rest.TLSClientConfig{}) {
+		t.Fatalf("TLSClientConfig = %#v, want empty because transport owns TLS", restConfig.TLSClientConfig)
+	}
+
+	client, err := getter.ToDiscoveryClient()
+	if err != nil {
+		t.Fatalf("ToDiscoveryClient() error = %v", err)
+	}
+	if _, err := client.ServerGroups(); err != nil {
+		t.Fatalf("ServerGroups() error = %v", err)
+	}
+	if !slices.Contains(transport.Paths(), "/api") || !slices.Contains(transport.Paths(), "/apis") {
+		t.Fatalf("transport paths = %v, want /api and /apis", transport.Paths())
+	}
+}
+
+func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Errorf("Encode() error = %v", err)
+	}
+}
+
+type recordingTransport struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+func (t *recordingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.paths = append(t.paths, request.URL.Path)
+	t.mu.Unlock()
+
+	var body string
+	switch request.URL.Path {
+	case "/api":
+		body = `{"kind":"APIVersions","apiVersion":"v1","versions":["v1"]}`
+	case "/apis":
+		body = `{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`
+	case "/api/v1":
+		body = `{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"v1","resources":[]}`
+	default:
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"text/plain"}},
+			Body:       io.NopCloser(strings.NewReader("not found")),
+			Request:    request,
+		}, nil
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    request,
+	}, nil
+}
+
+func (t *recordingTransport) Paths() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return slices.Clone(t.paths)
+}

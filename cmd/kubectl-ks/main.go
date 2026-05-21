@@ -1,0 +1,17 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	kscmd "github.com/kubesphere/ksctl/pkg/cmd"
+)
+
+func main() {
+	cmd := kscmd.NewRootCommand(kscmd.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}, kscmd.DefaultVersionInfo())
+	cmd.Use = "kubectl ks"
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
