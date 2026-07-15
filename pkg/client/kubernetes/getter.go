@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -44,11 +45,12 @@ type RESTClientGetter struct {
 	tokenProvider auth.TokenProvider
 	transport     http.RoundTripper
 
-	configOnce      sync.Once
-	baseConfig      *rest.Config
-	clientConfig    clientcmd.ClientConfig
-	resolvedCluster string
-	configErr       error
+	configOnce            sync.Once
+	baseConfig            *rest.Config
+	coreV1DiscoveryConfig *rest.Config
+	clientConfig          clientcmd.ClientConfig
+	resolvedCluster       string
+	configErr             error
 
 	discoveryOnce   sync.Once
 	discoveryClient discovery.CachedDiscoveryInterface
@@ -99,7 +101,15 @@ func (g *RESTClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterfa
 			g.discoveryErr = err
 			return
 		}
-		g.discoveryClient = memory.NewMemCacheClient(newFallbackDiscoveryClient(client))
+		var coreV1Fallback discovery.DiscoveryInterface
+		if g.coreV1DiscoveryConfig != nil {
+			coreV1Fallback, err = discovery.NewDiscoveryClientForConfig(g.coreV1DiscoveryConfig)
+			if err != nil {
+				g.discoveryErr = err
+				return
+			}
+		}
+		g.discoveryClient = memory.NewMemCacheClient(newFallbackDiscoveryClient(client, coreV1Fallback))
 	})
 	return g.discoveryClient, g.discoveryErr
 }
@@ -163,8 +173,20 @@ func (g *RESTClientGetter) loadConfig() {
 			g.configErr = err
 			return
 		}
+		resourceEndpoint := resolved.Endpoint
+		if resolved.Cluster != "" {
+			if messages := rest.IsValidPathSegmentName(resolved.Cluster); len(messages) != 0 {
+				g.configErr = fmt.Errorf("invalid cluster %q: %v", resolved.Cluster, messages)
+				return
+			}
+			resourceEndpoint, err = url.JoinPath(resolved.Endpoint, "clusters", resolved.Cluster)
+			if err != nil {
+				g.configErr = fmt.Errorf("build endpoint for cluster %q: %w", resolved.Cluster, err)
+				return
+			}
+		}
 		g.baseConfig = &rest.Config{
-			Host:        resolved.Endpoint,
+			Host:        resourceEndpoint,
 			BearerToken: resolvedToken,
 			UserAgent:   g.options.UserAgent,
 			Timeout:     timeout,
@@ -174,10 +196,14 @@ func (g *RESTClientGetter) loadConfig() {
 		} else {
 			g.baseConfig.Transport = g.transport
 		}
+		if resolved.Cluster != "" {
+			g.coreV1DiscoveryConfig = rest.CopyConfig(g.baseConfig)
+			g.coreV1DiscoveryConfig.Host = resolved.Endpoint
+		}
 
 		raw := clientcmdapi.NewConfig()
 		raw.Clusters[clientConfigName] = &clientcmdapi.Cluster{
-			Server:                   resolved.Endpoint,
+			Server:                   resourceEndpoint,
 			InsecureSkipTLSVerify:    tlsConfig.Insecure,
 			TLSServerName:            tlsConfig.ServerName,
 			CertificateAuthority:     tlsConfig.CAFile,

@@ -142,6 +142,70 @@ func TestRESTClientGetterReturnsResolvedKubeSphereCluster(t *testing.T) {
 	}
 }
 
+func TestRESTClientGetterScopesClientConfigsToResolvedCluster(t *testing.T) {
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.New()
+	cfg.CurrentContext = "prod"
+	cfg.Clusters["prod"] = config.Cluster{Host: "https://ks.example.com/proxy/"}
+	cfg.Users["admin"] = config.User{BearerToken: "secret"}
+	cfg.Contexts["prod"] = config.Context{Cluster: "prod", User: "admin", DefaultCluster: "context-member"}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	for _, test := range []struct {
+		name        string
+		clusterFlag string
+		want        string
+	}{
+		{name: "context default", want: "https://ks.example.com/proxy/clusters/context-member"},
+		{name: "flag override", clusterFlag: "flag-member", want: "https://ks.example.com/proxy/clusters/flag-member"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			getter := NewRESTClientGetter(&Options{
+				ConfigPath:    configPath,
+				Token:         "secret",
+				Cluster:       test.clusterFlag,
+				NoInteractive: true,
+			}, Dependencies{})
+			restConfig, err := getter.ToRESTConfig()
+			if err != nil {
+				t.Fatalf("ToRESTConfig() error = %v", err)
+			}
+			if restConfig.Host != test.want {
+				t.Fatalf("Host = %q, want %q", restConfig.Host, test.want)
+			}
+			rawConfig, err := getter.ToRawKubeConfigLoader().RawConfig()
+			if err != nil {
+				t.Fatalf("RawConfig() error = %v", err)
+			}
+			if got := rawConfig.Clusters[clientConfigName].Server; got != test.want {
+				t.Fatalf("raw cluster server = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRESTClientGetterRejectsInvalidClusterPathSegment(t *testing.T) {
+	for _, cluster := range []string{"..", "team/member", "team%2Fmember"} {
+		t.Run(cluster, func(t *testing.T) {
+			getter := NewRESTClientGetter(&Options{
+				Endpoint:      "https://ks.example.com/proxy",
+				Token:         "secret",
+				Cluster:       cluster,
+				NoInteractive: true,
+			}, Dependencies{})
+
+			_, err := getter.ToRESTConfig()
+			if err == nil || !strings.Contains(err.Error(), "invalid cluster") {
+				t.Fatalf("ToRESTConfig() error = %v, want invalid cluster error", err)
+			}
+		})
+	}
+}
+
 func TestRESTClientGetterCachesDiscoveryAndPreservesAPIPaths(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

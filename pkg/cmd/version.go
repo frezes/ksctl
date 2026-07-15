@@ -26,7 +26,6 @@ type serverVersionInfo struct {
 
 type versionRESTClientGetter interface {
 	ToRESTConfig() (*rest.Config, error)
-	KubeSphereCluster() (string, error)
 }
 
 func DefaultVersionInfo() VersionInfo {
@@ -49,10 +48,6 @@ func newVersionCommand(info VersionInfo, getter versionRESTClientGetter) *cobra.
 }
 
 func loadServerVersion(ctx context.Context, getter versionRESTClientGetter) (serverVersionInfo, error) {
-	cluster, err := getter.KubeSphereCluster()
-	if err != nil {
-		return serverVersionInfo{}, err
-	}
 	restConfig, err := getter.ToRESTConfig()
 	if err != nil {
 		return serverVersionInfo{}, err
@@ -71,9 +66,6 @@ func loadServerVersion(ctx context.Context, getter versionRESTClientGetter) (ser
 	}
 
 	request := client.Get().AbsPath("/kapis/version")
-	if cluster != "" {
-		request.Cluster(cluster)
-	}
 	raw, err := request.Do(ctx).Raw()
 	if err != nil {
 		return serverVersionInfo{}, err

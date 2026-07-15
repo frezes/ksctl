@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -110,6 +111,162 @@ func TestNativeGetResolvesBuiltInResourceWithCoreDiscoveryFallback(t *testing.T)
 	}
 }
 
+func TestNativeGetThroughSpecifiedCluster(t *testing.T) {
+	server := newClusterScopedCoreAPIServer(t, "host")
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+	cmd.SetArgs([]string{
+		"get", "po", "--all-namespaces",
+		"--endpoint", server.URL,
+		"--token", "secret",
+		"--cluster", "host",
+		"--no-interactive",
+		"-o", "json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out.String(), `"name": "demo-pod"`) {
+		t.Fatalf("get output missing cluster pod:\n%s", out.String())
+	}
+}
+
+func TestNativeGetCoreResourceThroughClusterWhenScopedDiscoveryFails(t *testing.T) {
+	var lock sync.Mutex
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lock.Lock()
+		paths = append(paths, r.URL.Path)
+		lock.Unlock()
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/clusters/host/api":
+			writeAPIJSON(t, w, metav1.APIVersions{
+				TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"},
+				Versions: []string{"v1"},
+			})
+		case "/clusters/host/apis":
+			writeAPIJSON(t, w, metav1.APIGroupList{
+				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+				Groups: []metav1.APIGroup{{
+					Name: "apps",
+					Versions: []metav1.GroupVersionForDiscovery{{
+						GroupVersion: "apps/v1",
+						Version:      "v1",
+					}},
+					PreferredVersion: metav1.GroupVersionForDiscovery{
+						GroupVersion: "apps/v1",
+						Version:      "v1",
+					},
+				}},
+			})
+		case "/clusters/host/api/v1":
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		case "/api/v1":
+			writeAPIJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{{
+					Name:         "nodes",
+					SingularName: "node",
+					Namespaced:   false,
+					Kind:         "Node",
+					Verbs:        metav1.Verbs{"get", "list"},
+				}},
+			})
+		case "/clusters/host/apis/apps/v1":
+			writeAPIJSON(t, w, metav1.APIResourceList{GroupVersion: "apps/v1"})
+		case "/clusters/host/api/v1/nodes":
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "v1",
+				"kind":       "NodeList",
+				"items": []any{map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Node",
+					"metadata":   map[string]any{"name": "host-node"},
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+	cmd.SetArgs([]string{
+		"get", "node",
+		"--endpoint", server.URL,
+		"--token", "secret",
+		"--cluster", "host",
+		"--no-interactive",
+		"-o", "json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out.String(), `"name": "host-node"`) {
+		t.Fatalf("get node output missing cluster node:\n%s", out.String())
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	for _, want := range []string{
+		"/clusters/host/api/v1",
+		"/api/v1",
+		"/clusters/host/apis/apps/v1",
+		"/clusters/host/api/v1/nodes",
+	} {
+		if !slices.Contains(paths, want) {
+			t.Errorf("request paths = %v, want %q", paths, want)
+		}
+	}
+	for _, path := range paths {
+		if path != "/api/v1" && !strings.HasPrefix(path, "/clusters/host/") {
+			t.Errorf("request path %q is unexpectedly unscoped", path)
+		}
+	}
+}
+
+func TestNativeDescribeUsesContextDefaultCluster(t *testing.T) {
+	server := newClusterScopedCoreAPIServer(t, "host")
+	defer server.Close()
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+
+	cfg := config.New()
+	cfg.CurrentContext = "local"
+	cfg.Clusters["local"] = config.Cluster{Host: server.URL}
+	cfg.Users["admin"] = config.User{BearerToken: "secret"}
+	cfg.Contexts["local"] = config.Context{Cluster: "local", User: "admin", DefaultCluster: "host"}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+	cmd.SetArgs([]string{
+		"describe", "pod/demo-pod",
+		"--namespace", "default",
+		"--token", "secret",
+		"--show-events=false",
+		"--no-interactive",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "demo-pod") {
+		t.Fatalf("describe output missing cluster pod:\n%s", out.String())
+	}
+}
+
 func TestNativeDescribeThroughKSApiServer(t *testing.T) {
 	server := newFakeKSApiServer(t)
 	defer server.Close()
@@ -175,9 +332,9 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 		kubernetesRequests++
 		lock.Unlock()
 		switch r.URL.Path {
-		case "/api":
+		case "/clusters/host/api":
 			writeAPIJSON(t, w, metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"}})
-		case "/apis":
+		case "/clusters/host/apis":
 			writeAPIJSON(t, w, metav1.APIGroupList{
 				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
 				Groups: []metav1.APIGroup{{
@@ -192,7 +349,7 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 					},
 				}},
 			})
-		case "/apis/tenant.kubesphere.io/v1beta1":
+		case "/clusters/host/apis/tenant.kubesphere.io/v1beta1":
 			writeAPIJSON(t, w, metav1.APIResourceList{
 				GroupVersion: "tenant.kubesphere.io/v1beta1",
 				APIResources: []metav1.APIResource{{
@@ -203,7 +360,7 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 					Verbs:        metav1.Verbs{"get", "list"},
 				}},
 			})
-		case "/apis/tenant.kubesphere.io/v1beta1/workspaces":
+		case "/clusters/host/apis/tenant.kubesphere.io/v1beta1/workspaces":
 			writeAPIJSON(t, w, map[string]any{
 				"apiVersion": "tenant.kubesphere.io/v1beta1",
 				"kind":       "WorkspaceList",
@@ -219,7 +376,7 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 	cfg.CurrentContext = "local"
 	cfg.Clusters["local"] = config.Cluster{Host: server.URL}
 	cfg.Users["admin"] = config.User{Username: "admin"}
-	cfg.Contexts["local"] = config.Context{Cluster: "local", User: "admin"}
+	cfg.Contexts["local"] = config.Context{Cluster: "local", User: "admin", DefaultCluster: "host"}
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatalf("Save config error = %v", err)
 	}
@@ -252,6 +409,75 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 	defer lock.Unlock()
 	if refreshRequests != 1 || kubernetesRequests == 0 {
 		t.Fatalf("refresh requests = %d, Kubernetes requests = %d", refreshRequests, kubernetesRequests)
+	}
+}
+
+func newClusterScopedCoreAPIServer(t *testing.T, cluster string) *httptest.Server {
+	t.Helper()
+	prefix := "/clusters/" + cluster
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, prefix+"/") {
+			t.Errorf("request path = %q, want prefix %q", r.URL.Path, prefix+"/")
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		switch strings.TrimPrefix(r.URL.Path, prefix) {
+		case "/api":
+			writeAPIJSON(t, w, metav1.APIVersions{
+				TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"},
+				Versions: []string{"v1"},
+			})
+		case "/apis":
+			writeAPIJSON(t, w, metav1.APIGroupList{
+				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+			})
+		case "/api/v1":
+			writeAPIJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{{
+					Name:         "pods",
+					SingularName: "pod",
+					Namespaced:   true,
+					Kind:         "Pod",
+					Verbs:        metav1.Verbs{"get", "list"},
+					ShortNames:   []string{"po"},
+				}},
+			})
+		case "/api/v1/pods":
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "v1",
+				"kind":       "PodList",
+				"items":      []any{podObject()},
+			})
+		case "/api/v1/namespaces/default/pods/demo-pod":
+			writeAPIJSON(t, w, podObject())
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func podObject() map[string]any {
+	return map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "demo-pod",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"containers": []any{map[string]any{
+				"name":  "demo",
+				"image": "nginx:latest",
+			}},
+		},
+		"status": map[string]any{"phase": "Running"},
 	}
 }
 
