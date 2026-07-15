@@ -2,31 +2,105 @@ package cmd
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
 
-func TestRootVersion(t *testing.T) {
-	streams := IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}
-	cmd := NewRootCommand(streams, VersionInfo{
-		Version:   "v0.1.0",
-		Commit:    "abc123",
-		BuildDate: "2026-05-21",
-		GoVersion: "go1.26.0",
-	})
-	cmd.SetArgs([]string{"version"})
+func TestRootVersionPrintsClientAndTargetVersions(t *testing.T) {
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/clusters/member/kapis/version" {
+			t.Errorf("path = %q, want /clusters/member/kapis/version", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"gitVersion":"v4.2.0","kubernetes":{"gitVersion":"v1.31.0"}}`))
+	}))
+	defer server.Close()
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "v0.1.0"})
+	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret", "--cluster", "member", "--no-interactive"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
+	const want = "ksctl Version: v0.1.0\nKubeSphere Version: v4.2.0\nKubernetes Version: v1.31.0\n"
+	if got := out.String(); got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
 
-	got := streams.Out.(*bytes.Buffer).String()
-	for _, want := range []string{"Client Version: v0.1.0", "Git Commit: abc123", "Build Date: 2026-05-21"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("version output missing %q in:\n%s", want, got)
-		}
+func TestRootVersionUsesUnknownForMissingServerField(t *testing.T) {
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"gitVersion":"v4.2.0"}`))
+	}))
+	defer server.Close()
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret", "--no-interactive"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	const want = "ksctl Version: dev\nKubeSphere Version: v4.2.0\nKubernetes Version: unknown\n"
+	if got := out.String(); got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
+	}
+}
+
+func TestRootVersionUsesUnknownForServerControlCharacters(t *testing.T) {
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"gitVersion":"v4.2.0\nforged","kubernetes":{"gitVersion":"\u001b[31mv1.31.0"}}`))
+	}))
+	defer server.Close()
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret", "--no-interactive"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	const want = "ksctl Version: dev\nKubeSphere Version: unknown\nKubernetes Version: unknown\n"
+	if got := out.String(); got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
+	}
+}
+
+func TestRootVersionFallsBackToUnknownWithoutServer(t *testing.T) {
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"version", "--no-interactive"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	const want = "ksctl Version: dev\nKubeSphere Version: unknown\nKubernetes Version: unknown\n"
+	if got := out.String(); got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
 	}
 }
 
@@ -105,14 +179,17 @@ func TestRootConnectionFlags(t *testing.T) {
 }
 
 func TestRootAcceptsVerbosityFlag(t *testing.T) {
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
 	streams := IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}
 	cmd := NewRootCommand(streams, VersionInfo{Version: "dev"})
-	cmd.SetArgs([]string{"-v=8", "version"})
+	cmd.SetArgs([]string{"-v=8", "version", "--no-interactive"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if !strings.Contains(streams.Out.(*bytes.Buffer).String(), "Client Version: dev") {
+	if !strings.Contains(streams.Out.(*bytes.Buffer).String(), "ksctl Version: dev") {
 		t.Fatalf("version output = %q", streams.Out.(*bytes.Buffer).String())
 	}
 }

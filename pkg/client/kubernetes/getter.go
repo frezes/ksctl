@@ -44,10 +44,11 @@ type RESTClientGetter struct {
 	tokenProvider auth.TokenProvider
 	transport     http.RoundTripper
 
-	configOnce   sync.Once
-	baseConfig   *rest.Config
-	clientConfig clientcmd.ClientConfig
-	configErr    error
+	configOnce      sync.Once
+	baseConfig      *rest.Config
+	clientConfig    clientcmd.ClientConfig
+	resolvedCluster string
+	configErr       error
 
 	discoveryOnce   sync.Once
 	discoveryClient discovery.CachedDiscoveryInterface
@@ -79,6 +80,11 @@ func (g *RESTClientGetter) ToRESTConfig() (*rest.Config, error) {
 		return nil, g.configErr
 	}
 	return rest.CopyConfig(g.baseConfig), nil
+}
+
+func (g *RESTClientGetter) KubeSphereCluster() (string, error) {
+	g.loadConfig()
+	return g.resolvedCluster, g.configErr
 }
 
 func (g *RESTClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
@@ -139,6 +145,7 @@ func (g *RESTClientGetter) loadConfig() {
 			g.configErr = err
 			return
 		}
+		g.resolvedCluster = resolved.Cluster
 
 		timeout, err := parseTimeout(g.options.RequestTimeout)
 		if err != nil {

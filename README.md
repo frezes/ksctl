@@ -80,7 +80,7 @@ Use `ksctl help`, `ksctl <command> --help`, or
 | `ksctl config view` | Display the merged ksctl configuration. |
 | `ksctl config current-context` | Display the current context name. |
 | `ksctl config use-context NAME` | Select an existing context. |
-| `ksctl version` | Display client build information. |
+| `ksctl version` | Display the ksctl, KubeSphere, and Kubernetes versions. |
 
 ## Scope and connection flags
 

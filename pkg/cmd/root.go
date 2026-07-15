@@ -53,23 +53,16 @@ func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&connection.NoInteractive, "no-interactive", false, "Fail instead of prompting for missing input")
 	addKlogVerbosityFlag(cmd, streams.ErrOut)
 
-	cmd.AddCommand(&cobra.Command{
-		Use:   "version",
-		Short: "Print client version information",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := cmd.OutOrStdout().Write([]byte(info.PrintHuman()))
-			return err
-		},
-	})
-
-	cmd.AddCommand(newConfigCommand(streams))
 	oauth := auth.NewOAuth(clientkubesphere.NewRESTClientFactory(nil))
-	cmd.AddCommand(newAuthCommand(connection.UserAgent, oauth))
-
 	provider := auth.NewProvider(auth.ProviderOptions{Refresher: oauth})
 	getter := clientkubernetes.NewRESTClientGetter(connection, clientkubernetes.Dependencies{
 		TokenProvider: provider,
 	})
+
+	cmd.AddCommand(newVersionCommand(info, getter))
+	cmd.AddCommand(newConfigCommand(streams))
+	cmd.AddCommand(newAuthCommand(connection.UserAgent, oauth))
+
 	factory := cmdutil.NewFactory(getter)
 	kubeStreams := genericiooptions.IOStreams{
 		In:     streams.In,

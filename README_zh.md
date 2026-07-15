@@ -77,7 +77,7 @@ ksctl [command] [TYPE] [NAME] [flags]
 | `ksctl config view` | 显示合并后的 ksctl 配置。 |
 | `ksctl config current-context` | 显示当前 Context 名称。 |
 | `ksctl config use-context NAME` | 选择已有 Context。 |
-| `ksctl version` | 显示客户端构建信息。 |
+| `ksctl version` | 显示 ksctl、KubeSphere 和 Kubernetes 版本。 |
 
 ## 作用域和连接参数
 
