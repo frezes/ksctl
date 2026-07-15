@@ -61,6 +61,8 @@ func TestRESTClientGetterBuildsKubeSphereConfig(t *testing.T) {
 }
 
 func TestRESTClientGetterMapsConfigTLSClientConfig(t *testing.T) {
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.New()
 	cfg.CurrentContext = "prod"
@@ -94,6 +96,49 @@ func TestRESTClientGetterMapsConfigTLSClientConfig(t *testing.T) {
 	}
 	if !restConfig.Insecure || restConfig.ServerName != "ks.example.com" || restConfig.CAFile != "/tmp/ca.crt" || string(restConfig.CAData) != "ca-data" {
 		t.Fatalf("TLSClientConfig = %#v", restConfig.TLSClientConfig)
+	}
+}
+
+func TestRESTClientGetterReturnsResolvedKubeSphereCluster(t *testing.T) {
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.New()
+	cfg.CurrentContext = "prod"
+	cfg.Clusters["prod"] = config.Cluster{Host: "https://ks.example.com"}
+	cfg.Users["admin"] = config.User{BearerToken: "secret"}
+	cfg.Contexts["prod"] = config.Context{
+		Cluster:        "prod",
+		User:           "admin",
+		DefaultCluster: "member-from-context",
+	}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	for _, test := range []struct {
+		name        string
+		clusterFlag string
+		want        string
+	}{
+		{name: "context default", want: "member-from-context"},
+		{name: "flag override", clusterFlag: "member-from-flag", want: "member-from-flag"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			getter := NewRESTClientGetter(&Options{
+				ConfigPath:    path,
+				Cluster:       test.clusterFlag,
+				NoInteractive: true,
+			}, Dependencies{})
+
+			got, err := getter.KubeSphereCluster()
+			if err != nil {
+				t.Fatalf("KubeSphereCluster() error = %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("KubeSphereCluster() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
