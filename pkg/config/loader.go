@@ -41,11 +41,8 @@ func Load(path string) (*Config, error) {
 	if cfg.Kind == "" {
 		cfg.Kind = ConfigKind
 	}
-	if cfg.Clusters == nil {
-		cfg.Clusters = map[string]Cluster{}
-	}
-	if cfg.Users == nil {
-		cfg.Users = map[string]User{}
+	if cfg.Fleets == nil {
+		cfg.Fleets = map[string]Fleet{}
 	}
 	if cfg.Contexts == nil {
 		cfg.Contexts = map[string]Context{}
@@ -60,7 +57,7 @@ func Save(path string, cfg *Config) error {
 	if cfg.Kind == "" {
 		cfg.Kind = ConfigKind
 	}
-	data, err := yaml.Marshal(cfg)
+	data, err := Marshal(cfg)
 	if err != nil {
 		return err
 	}

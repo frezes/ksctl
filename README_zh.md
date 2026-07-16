@@ -158,50 +158,77 @@ ksctl 使用独立于 kubeconfig 的 `~/.ksctl/config.yaml`。设置 `KSCTL_CONF
 ```yaml
 apiVersion: ksctl.kubesphere.io/v1alpha1
 kind: Config
-currentContext: local
-clusters:
-  local:
-    host: https://kubesphere.example.com
-    tlsClientConfig:
-      insecure: false
-users:
-  admin:
-    username: admin
-    bearerTokenFile: ""
-    bearerToken: ""
+currentContext: prod-admin
+fleets:
+  prod:
+    host: https://prod.example.com
+    users:
+      admin:
+        username: admin
+        password: "<plaintext-password>"
+  staging:
+    host: https://staging.example.com
+    users:
+      admin:
+        username: admin
+        bearerToken: "<token>"
 contexts:
-  local:
-    cluster: local
+  prod-admin:
+    fleet: prod
     user: admin
     defaultCluster: ""
-    defaultWorkspace: ""
+  staging-admin:
+    fleet: staging
+    user: admin
+    defaultCluster: ""
 ```
 
 新配置目录以 `0700` 权限创建，新配置文件以 `0600` 权限创建。省略 `username`
-时，默认使用 User Map 中对应的 Key。
+时，默认使用 User Map 中对应的 Key。User 归属于 Fleet，因此不同 Fleet 可以
+同时包含名为 `admin` 的账户。User 可以配置 `bearerTokenFile`、`bearerToken`
+或明文 `password`。其他可选空字段、空 User Map 及整个空 `tlsClientConfig`
+块不会输出；`defaultCluster` 始终输出，默认值为空字符串。根级 `users` 不会被
+读取或迁移。
 
 使用配置命令查看或切换 Context：
 
 ```bash
 ksctl config view
 ksctl config current-context
-ksctl config use-context local
+ksctl config use-context prod-admin
 ```
 
 ## 认证
 
 `ksctl auth login` 将非敏感的连接元数据写入配置文件，并将完整的 KubeSphere
-`/oauth/token` 响应写入 `~/.ksctl/cache/tokens/<context>.json`。新 Token 缓存目录
-以 `0700` 权限创建，新缓存文件以 `0600` 权限创建。密码不会被持久化。
+`/oauth/token` 响应写入 `~/.ksctl/cache/tokens/<fleet>/<user>.json`。新 Token
+缓存目录以 `0700` 权限创建，新缓存文件以 `0600` 权限创建。`auth login` 命令参数中的
+密码不会落盘；用户显式写入 Config 的密码则以明文保留在 Config 文件中。
 
 凭证按以下优先级解析：
 
 ```text
---token > KS_TOKEN > token cache > bearerTokenFile > bearerToken
+--token > KS_TOKEN > bearerTokenFile > bearerToken > token cache > password
 ```
 
-存在 Refresh Token 时，过期的缓存 Access Token 会自动刷新。如果刷新失败，
-请重新登录。删除当前或指定 Context 的缓存凭证：
+配置了 Token File 或 Token 时会直接使用，并跳过缓存刷新和密码登录。Token File
+读取失败、内容为空或 API 鉴权失败时直接返回错误，不尝试其他凭证。缓存 Access
+Token 过期时会尽量使用 Refresh Token 自动刷新；缓存不可用且 Config 中配置了
+密码时，只为当前命令请求 Access Token，不写入缓存。
+
+`auth logout` 只删除登录缓存，不修改手工配置的凭证。引用同一 Fleet/User 的
+多个 Context 共享 Token 缓存和退出状态。旧 Context 级缓存不会被读取或迁移。
+
+登录时可通过 `--fleet` 指定 Fleet 名；省略时根据本次 Endpoint Host 生成。
+省略 `--context` 时，Context 默认为 `<fleet>-<username>`，且不会从已有 Context
+推断 Fleet：
+
+```bash
+ksctl auth login https://prod.example.com \
+  --fleet prod --username admin --password '<password>'
+```
+
+删除当前或指定 Context 的登录缓存：
 
 ```bash
 ksctl auth logout

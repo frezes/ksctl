@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubesphere/ksctl/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -40,6 +41,40 @@ func TestRootVersionPrintsClientAndTargetVersions(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestRootVersionUsesContextDefaultCluster(t *testing.T) {
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/clusters/context-member/kapis/version" {
+			t.Errorf("path = %q, want /clusters/context-member/kapis/version", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"gitVersion":"v4.2.0","kubernetes":{"gitVersion":"v1.31.0"}}`))
+	}))
+	defer server.Close()
+
+	cfg := config.New()
+	cfg.CurrentContext = "local"
+	cfg.Fleets["local"] = config.Fleet{Host: server.URL, Users: map[string]config.User{"admin": {BearerToken: "secret"}}}
+	cfg.Contexts["local"] = config.Context{Fleet: "local", User: "admin", DefaultCluster: "context-member"}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "v0.1.0"})
+	cmd.SetArgs([]string{"version", "--token", "secret", "--no-interactive"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	const want = "ksctl Version: v0.1.0\nKubeSphere Version: v4.2.0\nKubernetes Version: v1.31.0\n"
+	if got := out.String(); got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
 	}
 }
 

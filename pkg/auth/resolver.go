@@ -24,7 +24,10 @@ type Resolved struct {
 	ExplicitToken   string
 	BearerTokenFile string
 	BearerToken     string
+	Password        string
 	Context         string
+	Fleet           string
+	User            string
 	Cluster         string
 	Workspace       string
 	TLSClientConfig config.TLSClientConfig
@@ -57,26 +60,30 @@ func Resolve(in ResolveInput) (Resolved, error) {
 		if !ok {
 			return out, fmt.Errorf("error: no context exists with the name: %s", out.Context)
 		}
+		fleet, ok := cfg.Fleets[ctx.Fleet]
+		if !ok {
+			return out, fmt.Errorf("error: no fleet exists with the name: %s", ctx.Fleet)
+		}
+		user, ok := fleet.Users[ctx.User]
+		if !ok {
+			return out, fmt.Errorf("error: no user exists with the name: %s in fleet: %s", ctx.User, ctx.Fleet)
+		}
+		out.Fleet = ctx.Fleet
+		out.User = ctx.User
 		if out.Endpoint == "" {
-			if cluster, ok := cfg.Clusters[ctx.Cluster]; ok {
-				out.Endpoint = cluster.Host
-				out.TLSClientConfig = cluster.TLSClientConfig
-			}
+			out.Endpoint = fleet.Host
+			out.TLSClientConfig = fleet.TLSClientConfig
 		}
 		if out.Cluster == "" {
 			out.Cluster = ctx.DefaultCluster
 		}
-		if out.Workspace == "" {
-			out.Workspace = ctx.DefaultWorkspace
+		out.Username = user.Username
+		if out.Username == "" {
+			out.Username = ctx.User
 		}
-		if user, ok := cfg.Users[ctx.User]; ok {
-			out.Username = user.Username
-			if out.Username == "" {
-				out.Username = ctx.User
-			}
-			out.BearerTokenFile = user.BearerTokenFile
-			out.BearerToken = user.BearerToken
-		}
+		out.BearerTokenFile = user.BearerTokenFile
+		out.BearerToken = user.BearerToken
+		out.Password = user.Password
 	}
 
 	if out.Endpoint == "" {

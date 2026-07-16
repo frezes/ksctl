@@ -5,7 +5,6 @@ import (
 
 	"github.com/kubesphere/ksctl/pkg/config"
 	"github.com/spf13/cobra"
-	"sigs.k8s.io/yaml"
 )
 
 func newConfigCommand(streams IOStreams) *cobra.Command {
@@ -60,7 +59,7 @@ func newConfigCommand(streams IOStreams) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			data, err := yaml.Marshal(cfg)
+			data, err := config.Marshal(cfg)
 			if err != nil {
 				return err
 			}

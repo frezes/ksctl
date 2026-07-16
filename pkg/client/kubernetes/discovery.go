@@ -13,14 +13,16 @@ import (
 
 type fallbackDiscoveryClient struct {
 	discovery.DiscoveryInterface
+	coreV1Fallback discovery.DiscoveryInterface
 
 	resourcesMu       sync.RWMutex
 	fallbackResources map[string]*metav1.APIResourceList
 }
 
-func newFallbackDiscoveryClient(live discovery.DiscoveryInterface) discovery.DiscoveryInterface {
+func newFallbackDiscoveryClient(live, coreV1Fallback discovery.DiscoveryInterface) discovery.DiscoveryInterface {
 	return &fallbackDiscoveryClient{
 		DiscoveryInterface: live,
+		coreV1Fallback:     coreV1Fallback,
 	}
 }
 
@@ -57,7 +59,11 @@ func (c *fallbackDiscoveryClient) ServerResourcesForGroupVersion(groupVersion st
 	if resources != nil {
 		return resources, nil
 	}
-	return c.DiscoveryInterface.ServerResourcesForGroupVersion(groupVersion)
+	resources, err := c.DiscoveryInterface.ServerResourcesForGroupVersion(groupVersion)
+	if err != nil && groupVersion == "v1" && c.coreV1Fallback != nil {
+		return c.coreV1Fallback.ServerResourcesForGroupVersion(groupVersion)
+	}
+	return resources, err
 }
 
 func (c *fallbackDiscoveryClient) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
@@ -205,7 +211,7 @@ func (c *fallbackDiscoveryClient) probeGroupVersions(groupVersions []schema.Grou
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			list, err := c.DiscoveryInterface.ServerResourcesForGroupVersion(gv.String())
+			list, err := c.ServerResourcesForGroupVersion(gv.String())
 			if err == nil {
 				resources[index] = list
 			}

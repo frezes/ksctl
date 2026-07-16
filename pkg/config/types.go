@@ -9,14 +9,14 @@ type Config struct {
 	APIVersion     string             `json:"apiVersion" yaml:"apiVersion"`
 	Kind           string             `json:"kind" yaml:"kind"`
 	CurrentContext string             `json:"currentContext,omitempty" yaml:"currentContext,omitempty"`
-	Clusters       map[string]Cluster `json:"clusters,omitempty" yaml:"clusters,omitempty"`
-	Users          map[string]User    `json:"users,omitempty" yaml:"users,omitempty"`
+	Fleets         map[string]Fleet   `json:"fleets,omitempty" yaml:"fleets,omitempty"`
 	Contexts       map[string]Context `json:"contexts,omitempty" yaml:"contexts,omitempty"`
 }
 
-type Cluster struct {
+type Fleet struct {
 	Host            string          `json:"host" yaml:"host"`
 	TLSClientConfig TLSClientConfig `json:"tlsClientConfig,omitempty" yaml:"tlsClientConfig,omitempty"`
+	Users           map[string]User `json:"users,omitempty" yaml:"users,omitempty"`
 }
 
 type TLSClientConfig struct {
@@ -35,21 +35,20 @@ type User struct {
 	Username        string `json:"username,omitempty" yaml:"username,omitempty"`
 	BearerToken     string `json:"bearerToken,omitempty" yaml:"bearerToken,omitempty"`
 	BearerTokenFile string `json:"bearerTokenFile,omitempty" yaml:"bearerTokenFile,omitempty"`
+	Password        string `json:"password,omitempty" yaml:"password,omitempty"`
 }
 
 type Context struct {
-	Cluster          string `json:"cluster" yaml:"cluster"`
-	User             string `json:"user" yaml:"user"`
-	DefaultCluster   string `json:"defaultCluster,omitempty" yaml:"defaultCluster,omitempty"`
-	DefaultWorkspace string `json:"defaultWorkspace,omitempty" yaml:"defaultWorkspace,omitempty"`
+	Fleet          string `json:"fleet" yaml:"fleet"`
+	User           string `json:"user" yaml:"user"`
+	DefaultCluster string `json:"defaultCluster" yaml:"defaultCluster"`
 }
 
 func New() *Config {
 	return &Config{
 		APIVersion: ConfigAPIVersion,
 		Kind:       ConfigKind,
-		Clusters:   map[string]Cluster{},
-		Users:      map[string]User{},
+		Fleets:     map[string]Fleet{},
 		Contexts:   map[string]Context{},
 	}
 }

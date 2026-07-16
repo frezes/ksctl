@@ -53,8 +53,8 @@ func DefaultDir() string {
 	return filepath.Join(home, ".ksctl", "cache", "tokens")
 }
 
-func Path(dir, context string) string {
-	return filepath.Join(dir, SafeName(context)+".json")
+func Path(dir, fleet, user string) string {
+	return filepath.Join(dir, SafeName(fleet), SafeName(user)+".json")
 }
 
 func SafeName(value string) string {
@@ -65,8 +65,8 @@ func SafeName(value string) string {
 	return name
 }
 
-func Load(dir, context string) (Entry, error) {
-	data, err := os.ReadFile(Path(dir, context))
+func Load(dir, fleet, user string) (Entry, error) {
+	data, err := os.ReadFile(Path(dir, fleet, user))
 	if err != nil {
 		return Entry{}, err
 	}
@@ -77,19 +77,20 @@ func Load(dir, context string) (Entry, error) {
 	return entry, nil
 }
 
-func Save(dir, context string, entry Entry) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+func Save(dir, fleet, user string, entry Entry) error {
+	fleetDir := filepath.Join(dir, SafeName(fleet))
+	if err := os.MkdirAll(fleetDir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(Path(dir, context), data, 0o600)
+	return os.WriteFile(Path(dir, fleet, user), data, 0o600)
 }
 
-func Delete(dir, context string) error {
-	err := os.Remove(Path(dir, context))
+func Delete(dir, fleet, user string) error {
+	err := os.Remove(Path(dir, fleet, user))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
