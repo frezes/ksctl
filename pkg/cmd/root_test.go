@@ -60,9 +60,8 @@ func TestRootVersionUsesContextDefaultCluster(t *testing.T) {
 
 	cfg := config.New()
 	cfg.CurrentContext = "local"
-	cfg.Clusters["local"] = config.Cluster{Host: server.URL}
-	cfg.Users["admin"] = config.User{BearerToken: "secret"}
-	cfg.Contexts["local"] = config.Context{Cluster: "local", User: "admin", DefaultCluster: "context-member"}
+	cfg.Fleets["local"] = config.Fleet{Host: server.URL, Users: map[string]config.User{"admin": {BearerToken: "secret"}}}
+	cfg.Contexts["local"] = config.Context{Fleet: "local", User: "admin", DefaultCluster: "context-member"}
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}

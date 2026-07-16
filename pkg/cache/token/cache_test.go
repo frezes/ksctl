@@ -17,7 +17,7 @@ func TestCacheSaveLoadAndDelete(t *testing.T) {
 		ExpiresIn:    7200,
 	}, now)
 
-	if err := Save(dir, "local/context", entry); err != nil {
+	if err := Save(dir, "prod", "admin", entry); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	info, err := os.Stat(dir)
@@ -28,8 +28,17 @@ func TestCacheSaveLoadAndDelete(t *testing.T) {
 		t.Fatalf("cache dir mode = %v, want 0700", got)
 	}
 
-	path := Path(dir, "local/context")
-	if filepath.Base(path) != "local-context.json" {
+	fleetDir := filepath.Join(dir, "prod")
+	info, err = os.Stat(fleetDir)
+	if err != nil {
+		t.Fatalf("Stat fleet cache dir error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("fleet cache dir mode = %v, want 0700", got)
+	}
+
+	path := Path(dir, "prod", "admin")
+	if path != filepath.Join(dir, "prod", "admin.json") {
 		t.Fatalf("Path() = %q", path)
 	}
 	info, err = os.Stat(path)
@@ -40,7 +49,7 @@ func TestCacheSaveLoadAndDelete(t *testing.T) {
 		t.Fatalf("cache mode = %v, want 0600", got)
 	}
 
-	loaded, err := Load(dir, "local/context")
+	loaded, err := Load(dir, "prod", "admin")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -57,10 +66,52 @@ func TestCacheSaveLoadAndDelete(t *testing.T) {
 		t.Fatal("ValidAt() = true inside safety window, want false")
 	}
 
-	if err := Delete(dir, "local/context"); err != nil {
+	if err := Delete(dir, "prod", "admin"); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("cache file still exists, err=%v", err)
+	}
+}
+
+func TestCacheSeparatesSameNamedUsersByFleet(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "tokens")
+	prod := NewEntry(Response{AccessToken: "prod-token", ExpiresIn: 3600}, time.Now())
+	staging := NewEntry(Response{AccessToken: "staging-token", ExpiresIn: 3600}, time.Now())
+	if err := Save(dir, "prod", "admin", prod); err != nil {
+		t.Fatalf("Save(prod/admin) error = %v", err)
+	}
+	if err := Save(dir, "staging", "admin", staging); err != nil {
+		t.Fatalf("Save(staging/admin) error = %v", err)
+	}
+
+	for _, test := range []struct{ fleet, token string }{{"prod", "prod-token"}, {"staging", "staging-token"}} {
+		entry, err := Load(dir, test.fleet, "admin")
+		if err != nil {
+			t.Fatalf("Load(%s/admin) error = %v", test.fleet, err)
+		}
+		if entry.AccessToken != test.token {
+			t.Fatalf("Load(%s/admin) token = %q", test.fleet, entry.AccessToken)
+		}
+	}
+
+	if err := Delete(dir, "prod", "admin"); err != nil {
+		t.Fatalf("Delete(prod/admin) error = %v", err)
+	}
+	if _, err := Load(dir, "staging", "admin"); err != nil {
+		t.Fatalf("staging/admin removed with prod/admin: %v", err)
+	}
+}
+
+func TestCacheDoesNotReadFlatContextCache(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "tokens")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "old-context.json"), []byte(`{"access_token":"old-token"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := Load(dir, "old-context", "admin"); !os.IsNotExist(err) {
+		t.Fatalf("Load() error = %v, want not exist", err)
 	}
 }

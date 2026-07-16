@@ -66,7 +66,7 @@ func TestRESTClientGetterMapsConfigTLSClientConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.New()
 	cfg.CurrentContext = "prod"
-	cfg.Clusters["prod"] = config.Cluster{
+	cfg.Fleets["prod"] = config.Fleet{
 		Host: "https://ks.example.com",
 		TLSClientConfig: config.TLSClientConfig{
 			Insecure:   true,
@@ -74,9 +74,9 @@ func TestRESTClientGetterMapsConfigTLSClientConfig(t *testing.T) {
 			CAFile:     "/tmp/ca.crt",
 			CAData:     "ca-data",
 		},
+		Users: map[string]config.User{"admin": {BearerToken: "secret"}},
 	}
-	cfg.Users["admin"] = config.User{BearerToken: "secret"}
-	cfg.Contexts["prod"] = config.Context{Cluster: "prod", User: "admin"}
+	cfg.Contexts["prod"] = config.Context{Fleet: "prod", User: "admin"}
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -105,10 +105,9 @@ func TestRESTClientGetterReturnsResolvedKubeSphereCluster(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.New()
 	cfg.CurrentContext = "prod"
-	cfg.Clusters["prod"] = config.Cluster{Host: "https://ks.example.com"}
-	cfg.Users["admin"] = config.User{BearerToken: "secret"}
+	cfg.Fleets["prod"] = config.Fleet{Host: "https://ks.example.com", Users: map[string]config.User{"admin": {BearerToken: "secret"}}}
 	cfg.Contexts["prod"] = config.Context{
-		Cluster:        "prod",
+		Fleet:          "prod",
 		User:           "admin",
 		DefaultCluster: "member-from-context",
 	}
@@ -148,9 +147,8 @@ func TestRESTClientGetterScopesClientConfigsToResolvedCluster(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.New()
 	cfg.CurrentContext = "prod"
-	cfg.Clusters["prod"] = config.Cluster{Host: "https://ks.example.com/proxy/"}
-	cfg.Users["admin"] = config.User{BearerToken: "secret"}
-	cfg.Contexts["prod"] = config.Context{Cluster: "prod", User: "admin", DefaultCluster: "context-member"}
+	cfg.Fleets["prod"] = config.Fleet{Host: "https://ks.example.com/proxy/", Users: map[string]config.User{"admin": {BearerToken: "secret"}}}
+	cfg.Contexts["prod"] = config.Context{Fleet: "prod", User: "admin", DefaultCluster: "context-member"}
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}

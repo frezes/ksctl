@@ -162,53 +162,84 @@ ksctl uses `~/.ksctl/config.yaml`, independently of kubeconfig. Set
 ```yaml
 apiVersion: ksctl.kubesphere.io/v1alpha1
 kind: Config
-currentContext: local
-clusters:
-  local:
-    host: https://kubesphere.example.com
-    tlsClientConfig:
-      insecure: false
-users:
-  admin:
-    username: admin
-    bearerTokenFile: ""
-    bearerToken: ""
+currentContext: prod-admin
+fleets:
+  prod:
+    host: https://prod.example.com
+    users:
+      admin:
+        username: admin
+        password: "<plaintext-password>"
+  staging:
+    host: https://staging.example.com
+    users:
+      admin:
+        username: admin
+        bearerToken: "<token>"
 contexts:
-  local:
-    cluster: local
+  prod-admin:
+    fleet: prod
     user: admin
     defaultCluster: ""
-    defaultWorkspace: ""
+  staging-admin:
+    fleet: staging
+    user: admin
+    defaultCluster: ""
 ```
 
 New configuration directories are created with mode `0700`, and new
 configuration files with mode `0600`. `username` defaults to the user map key
-when omitted.
+when omitted. Users are scoped to their Fleet, so different Fleets may both
+contain an `admin` account. A User may configure `bearerTokenFile`,
+`bearerToken`, or a plaintext `password`. Empty optional fields, empty User
+maps, and an empty `tlsClientConfig` block are omitted; `defaultCluster` is
+always displayed and defaults to an empty string. Root-level `users` are not
+supported or migrated.
 
 Use the config commands to inspect or switch contexts:
 
 ```bash
 ksctl config view
 ksctl config current-context
-ksctl config use-context local
+ksctl config use-context prod-admin
 ```
 
 ## Authentication
 
 `ksctl auth login` stores non-sensitive connection metadata in the config file
 and the complete KubeSphere `/oauth/token` response in
-`~/.ksctl/cache/tokens/<context>.json`. New token cache directories use mode
-`0700`, and new cache files use mode `0600`. Passwords are never persisted.
+`~/.ksctl/cache/tokens/<fleet>/<user>.json`. New token cache directories use
+mode `0700`, and new cache files use mode `0600`. The password passed to
+`auth login` is never persisted. A password explicitly written by the user in
+the Config remains plaintext in the Config file.
 
 Credentials are resolved in this order:
 
 ```text
---token > KS_TOKEN > token cache > bearerTokenFile > bearerToken
+--token > KS_TOKEN > bearerTokenFile > bearerToken > token cache > password
 ```
 
-An expired cached access token is refreshed automatically when a refresh token
-is available. If refresh fails, log in again. To remove the cached credentials
-for the current or a named context:
+A configured Token File or Token is used directly and bypasses cache Refresh
+and password login. Read, empty-file, and API authorization errors are returned
+without trying another credential. An expired cached Access Token is refreshed
+automatically when possible. If no usable cache remains and a Config password
+is present, ksctl requests an Access Token for the current command only and
+does not cache it.
+
+`auth logout` removes only cached login state; manually configured credentials
+remain unchanged. Contexts that select the same Fleet and User share one Token
+cache and logout state. Old Context-level cache files are not read or migrated.
+
+Use `--fleet` to choose a Fleet name during login. Without it, ksctl derives
+the Fleet name from the Endpoint Host. Without `--context`, the Context name is
+`<fleet>-<username>`; existing Contexts are never used to infer a Fleet:
+
+```bash
+ksctl auth login https://prod.example.com \
+  --fleet prod --username admin --password '<password>'
+```
+
+To remove the cache for the current or a named Context:
 
 ```bash
 ksctl auth logout

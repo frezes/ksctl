@@ -24,22 +24,20 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		APIVersion:     ConfigAPIVersion,
 		Kind:           ConfigKind,
 		CurrentContext: "prod",
-		Clusters: map[string]Cluster{"prod": {
+		Fleets: map[string]Fleet{"prod": {
 			Host: "https://ks.example.com",
 			TLSClientConfig: TLSClientConfig{
-				Insecure:   true,
 				ServerName: "ks.example.com",
 				CAData:     "ca-data",
 			},
-		}},
-		Users: map[string]User{
-			"admin": {
+			Users: map[string]User{"admin": {
 				Username:        "administrator",
 				BearerToken:     "config-token",
 				BearerTokenFile: "/tmp/ks-token",
-			},
-		},
-		Contexts: map[string]Context{"prod": {Cluster: "prod", User: "admin", DefaultCluster: "host"}},
+				Password:        "plaintext-password",
+			}},
+		}},
+		Contexts: map[string]Context{"prod": {Fleet: "prod", User: "admin"}},
 	}
 
 	if err := Save(path, cfg); err != nil {
@@ -59,14 +57,17 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	}
 	contents := string(data)
 	for _, want := range []string{
+		"fleets:",
 		"host: https://ks.example.com",
 		"tlsClientConfig:",
-		"insecure: true",
 		"serverName: ks.example.com",
 		"caData: ca-data",
 		"username: administrator",
 		"bearerToken: config-token",
 		"bearerTokenFile: /tmp/ks-token",
+		"password: plaintext-password",
+		"fleet: prod",
+		`defaultCluster: ""`,
 	} {
 		if !strings.Contains(contents, want) {
 			t.Fatalf("saved config does not contain %q:\n%s", want, contents)
@@ -82,11 +83,57 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	cluster := loaded.Clusters["prod"]
-	if loaded.CurrentContext != "prod" || cluster.Host != "https://ks.example.com" || !cluster.TLSClientConfig.Insecure || cluster.TLSClientConfig.ServerName != "ks.example.com" || cluster.TLSClientConfig.CAData != "ca-data" {
+	fleet := loaded.Fleets["prod"]
+	if loaded.CurrentContext != "prod" || fleet.Host != "https://ks.example.com" || fleet.TLSClientConfig.ServerName != "ks.example.com" || fleet.TLSClientConfig.CAData != "ca-data" {
 		t.Fatalf("loaded config mismatch: %#v", loaded)
 	}
-	if got := loaded.Users["admin"]; got.Username != "administrator" || got.BearerToken != "config-token" || got.BearerTokenFile != "/tmp/ks-token" {
+	if got := fleet.Users["admin"]; got.Username != "administrator" || got.BearerToken != "config-token" || got.BearerTokenFile != "/tmp/ks-token" || got.Password != "plaintext-password" {
 		t.Fatalf("loaded user = %#v", got)
+	}
+}
+
+func TestMarshalOmitsEmptyTLSClientConfig(t *testing.T) {
+	cfg := New()
+	cfg.Fleets["prod"] = Fleet{Host: "http://ks.example.com"}
+	cfg.Contexts["prod"] = Context{Fleet: "prod", User: "admin"}
+
+	data, err := Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if strings.Contains(string(data), "tlsClientConfig") {
+		t.Fatalf("Marshal() emitted empty TLS config:\n%s", data)
+	}
+	if !strings.Contains(string(data), `defaultCluster: ""`) {
+		t.Fatalf("Marshal() omitted defaultCluster:\n%s", data)
+	}
+}
+
+func TestLoadDoesNotMapLegacyClustersToFleets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("clusters:\n  old:\n    host: https://old.example.com\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Fleets) != 0 {
+		t.Fatalf("legacy clusters were mapped to fleets: %#v", cfg.Fleets)
+	}
+}
+
+func TestLoadDoesNotMapRootUsersToFleets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("fleets:\n  prod:\n    host: https://prod.example.com\nusers:\n  admin:\n    bearerToken: old-token\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Fleets["prod"].Users; len(got) != 0 {
+		t.Fatalf("root users were mapped into fleet: %#v", got)
 	}
 }

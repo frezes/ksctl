@@ -243,9 +243,8 @@ func TestNativeDescribeUsesContextDefaultCluster(t *testing.T) {
 
 	cfg := config.New()
 	cfg.CurrentContext = "local"
-	cfg.Clusters["local"] = config.Cluster{Host: server.URL}
-	cfg.Users["admin"] = config.User{BearerToken: "secret"}
-	cfg.Contexts["local"] = config.Context{Cluster: "local", User: "admin", DefaultCluster: "host"}
+	cfg.Fleets["local"] = config.Fleet{Host: server.URL, Users: map[string]config.User{"admin": {BearerToken: "secret"}}}
+	cfg.Contexts["local"] = config.Context{Fleet: "local", User: "admin", DefaultCluster: "host"}
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -374,14 +373,13 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 
 	cfg := config.New()
 	cfg.CurrentContext = "local"
-	cfg.Clusters["local"] = config.Cluster{Host: server.URL}
-	cfg.Users["admin"] = config.User{Username: "admin"}
-	cfg.Contexts["local"] = config.Context{Cluster: "local", User: "admin", DefaultCluster: "host"}
+	cfg.Fleets["local"] = config.Fleet{Host: server.URL, Users: map[string]config.User{"admin": {Username: "admin"}}}
+	cfg.Contexts["local"] = config.Context{Fleet: "local", User: "admin", DefaultCluster: "host"}
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatalf("Save config error = %v", err)
 	}
 	cacheDir := filepath.Join(home, ".ksctl", "cache", "tokens")
-	if err := tokencache.Save(cacheDir, "local", tokencache.NewEntry(tokencache.Response{
+	if err := tokencache.Save(cacheDir, "local", "admin", tokencache.NewEntry(tokencache.Response{
 		AccessToken:  "expired-token",
 		RefreshToken: "expired-refresh-token",
 		ExpiresIn:    1,
@@ -398,7 +396,7 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 	if !strings.Contains(out.String(), `"name": "demo"`) {
 		t.Fatalf("get output missing refreshed request result:\n%s", out.String())
 	}
-	entry, err := tokencache.Load(cacheDir, "local")
+	entry, err := tokencache.Load(cacheDir, "local", "admin")
 	if err != nil {
 		t.Fatalf("Load token cache error = %v", err)
 	}

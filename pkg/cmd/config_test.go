@@ -34,7 +34,7 @@ func TestConfigCurrentContext(t *testing.T) {
 func TestConfigUseContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.New()
-	cfg.Contexts["prod"] = config.Context{Cluster: "prod", User: "admin"}
+	cfg.Contexts["prod"] = config.Context{Fleet: "prod", User: "admin"}
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatal(err)
 	}

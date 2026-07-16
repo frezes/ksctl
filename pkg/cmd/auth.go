@@ -25,6 +25,7 @@ func newAuthCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
 func newLoginCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
 	var username string
 	var password string
+	var fleetName string
 	var contextName string
 
 	cmd := &cobra.Command{
@@ -39,8 +40,11 @@ func newLoginCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
 			if password == "" {
 				return fmt.Errorf("error: --password is required")
 			}
+			if fleetName == "" {
+				fleetName = defaultLoginFleetName(endpoint)
+			}
 			if contextName == "" {
-				contextName = defaultLoginContextName(endpoint)
+				contextName = tokencache.SafeName(fleetName + "-" + username)
 			}
 
 			response, err := oauth.Login(cmd.Context(), auth.TokenRequestOptions{
@@ -59,13 +63,20 @@ func newLoginCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
 				return err
 			}
 			cfg.CurrentContext = contextName
-			cfg.Clusters[contextName] = config.Cluster{Host: endpoint}
-			cfg.Users[username] = config.User{Username: username}
-			cfg.Contexts[contextName] = config.Context{Cluster: contextName, User: username}
+			fleet := cfg.Fleets[fleetName]
+			fleet.Host = endpoint
+			if fleet.Users == nil {
+				fleet.Users = map[string]config.User{}
+			}
+			user := fleet.Users[username]
+			user.Username = username
+			fleet.Users[username] = user
+			cfg.Fleets[fleetName] = fleet
+			cfg.Contexts[contextName] = config.Context{Fleet: fleetName, User: username}
 			if err := config.Save(config.DefaultPath(), cfg); err != nil {
 				return err
 			}
-			if err := tokencache.Save(tokencache.DefaultDir(), contextName, tokencache.NewEntry(response, time.Now())); err != nil {
+			if err := tokencache.Save(tokencache.DefaultDir(), fleetName, username, tokencache.NewEntry(response, time.Now())); err != nil {
 				return err
 			}
 
@@ -75,6 +86,7 @@ func newLoginCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&username, "username", "u", "", "KubeSphere username")
 	cmd.Flags().StringVarP(&password, "password", "p", "", "KubeSphere password")
+	cmd.Flags().StringVar(&fleetName, "fleet", "", "ksctl fleet name")
 	cmd.Flags().StringVar(&contextName, "context", "", "ksctl context name")
 	return cmd
 }
@@ -96,17 +108,18 @@ func newLogoutCommand() *cobra.Command {
 			if contextName == "" {
 				return fmt.Errorf("error: context is required")
 			}
-			if err := tokencache.Delete(tokencache.DefaultDir(), contextName); err != nil {
-				return err
+			ctx, ok := cfg.Contexts[contextName]
+			if !ok {
+				return fmt.Errorf("error: no context exists with the name: %s", contextName)
 			}
-			if ctx, ok := cfg.Contexts[contextName]; ok {
-				if user, ok := cfg.Users[ctx.User]; ok {
-					user.BearerToken = ""
-					user.BearerTokenFile = ""
-					cfg.Users[ctx.User] = user
-				}
+			fleet, ok := cfg.Fleets[ctx.Fleet]
+			if !ok {
+				return fmt.Errorf("error: no fleet exists with the name: %s", ctx.Fleet)
 			}
-			if err := config.Save(config.DefaultPath(), cfg); err != nil {
+			if _, ok := fleet.Users[ctx.User]; !ok {
+				return fmt.Errorf("error: no user exists with the name: %s in fleet: %s", ctx.User, ctx.Fleet)
+			}
+			if err := tokencache.Delete(tokencache.DefaultDir(), ctx.Fleet, ctx.User); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Logged out from %q\n", contextName)
@@ -116,7 +129,7 @@ func newLogoutCommand() *cobra.Command {
 	return cmd
 }
 
-func defaultLoginContextName(endpoint string) string {
+func defaultLoginFleetName(endpoint string) string {
 	parsed, err := url.Parse(endpoint)
 	if err == nil && parsed.Host != "" {
 		return tokencache.SafeName(parsed.Host)

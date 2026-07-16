@@ -54,7 +54,7 @@ func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
 	addKlogVerbosityFlag(cmd, streams.ErrOut)
 
 	oauth := auth.NewOAuth(clientkubesphere.NewRESTClientFactory(nil))
-	provider := auth.NewProvider(auth.ProviderOptions{Refresher: oauth})
+	provider := auth.NewProvider(auth.ProviderOptions{Requester: oauth})
 	getter := clientkubernetes.NewRESTClientGetter(connection, clientkubernetes.Dependencies{
 		TokenProvider: provider,
 	})
