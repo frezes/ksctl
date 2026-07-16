@@ -49,8 +49,6 @@ func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
 	cmd.PersistentFlags().StringVar(&connection.Workspace, "workspace", "", "KubeSphere workspace name")
 	cmd.PersistentFlags().StringVarP(&connection.Namespace, "namespace", "n", "", "Kubernetes namespace or KubeSphere project")
 	cmd.PersistentFlags().StringVar(&connection.RequestTimeout, "request-timeout", "0", "The length of time to wait before giving up on a single server request")
-	cmd.PersistentFlags().BoolVar(&connection.InsecureSkipTLSVerify, "insecure-skip-tls-verify", false, "Skip the validity check for the server's certificate")
-	cmd.PersistentFlags().BoolVar(&connection.NoInteractive, "no-interactive", false, "Fail instead of prompting for missing input")
 	addKlogVerbosityFlag(cmd, streams.ErrOut)
 
 	oauth := auth.NewOAuth(clientkubesphere.NewRESTClientFactory(nil))

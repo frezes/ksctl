@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,9 +11,162 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubesphere/ksctl/pkg/auth"
 	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
+	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
+	authcmd "github.com/kubesphere/ksctl/pkg/cmd/auth"
 	"github.com/kubesphere/ksctl/pkg/config"
+	"github.com/spf13/cobra"
 )
+
+type commandPrompter struct {
+	results []string
+	prompts []string
+	writer  io.Writer
+}
+
+func (p *commandPrompter) Available() bool { return true }
+
+func (p *commandPrompter) ReadLine(prompt string) (string, error) {
+	p.prompts = append(p.prompts, prompt)
+	if _, err := io.WriteString(p.writer, prompt); err != nil {
+		return "", err
+	}
+	result := p.results[0]
+	p.results = p.results[1:]
+	return result, nil
+}
+
+func TestLoginPromptsAndPersistsResolvedDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm() error = %v", err)
+		}
+		if r.Form.Get("username") != "admin" || r.Form.Get("password") != "temporary-password" {
+			t.Errorf("form = %#v", r.Form)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"issued-token","expires_in":7200}`))
+	}))
+	defer server.Close()
+
+	prompter := &commandPrompter{results: []string{server.URL, "admin", "temporary-password", "", ""}}
+	cmd := newLoginTestRoot(prompter)
+	cmd.SetArgs([]string{"auth", "login"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	fleet := authcmd.DefaultFleetName(server.URL)
+	contextName := authcmd.DefaultContextName(fleet, "admin")
+	wantErr := "endpoint: username: password: fleet [" + fleet + "]: context [" + contextName + "]: "
+	if got := cmd.ErrOrStderr().(*bytes.Buffer).String(); got != wantErr {
+		t.Fatalf("stderr = %q, want %q", got, wantErr)
+	}
+	wantOut := "Logged in to \"" + contextName + "\"\n"
+	if got := cmd.OutOrStdout().(*bytes.Buffer).String(); got != wantOut {
+		t.Fatalf("stdout = %q, want %q", got, wantOut)
+	}
+	if got := cmd.OutOrStdout().(*bytes.Buffer).String(); strings.Contains(got, wantErr) {
+		t.Fatalf("stdout = %q, contains prompt transcript %q", got, wantErr)
+	}
+	if got := cmd.ErrOrStderr().(*bytes.Buffer).String(); strings.Contains(got, wantOut) {
+		t.Fatalf("stderr = %q, contains success message %q", got, wantOut)
+	}
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.CurrentContext != contextName || loaded.Contexts[contextName].Fleet != fleet || loaded.Fleets[fleet].Host != server.URL {
+		t.Fatalf("config = %#v", loaded)
+	}
+}
+
+func TestLoginMissingRequiredInputDoesNotReadNonTerminalStdin(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "endpoint", args: []string{"auth", "login"}, want: "error: endpoint is required"},
+		{name: "username", args: []string{"auth", "login", "https://ks.example.com"}, want: "error: --username is required"},
+		{name: "password", args: []string{"auth", "login", "https://ks.example.com", "--username", "admin"}, want: "error: --password is required"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := NewRootCommand(IOStreams{In: strings.NewReader("must-not-be-read\n"), Out: io.Discard, ErrOut: io.Discard}, VersionInfo{Version: "dev"})
+			cmd.SetArgs(test.args)
+			err := cmd.Execute()
+			if err == nil || err.Error() != test.want {
+				t.Fatalf("Execute() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestLoginAuthFailureDoesNotRetryOrPersist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		http.Error(w, "denied", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	prompter := &commandPrompter{results: []string{server.URL, "admin", "temporary-password", "", ""}}
+	cmd := newLoginTestRoot(prompter)
+	cmd.SetArgs([]string{"auth", "login"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "KubeSphere login failed") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Fatalf("config file error = %v, want not exist", err)
+	}
+	fleet := authcmd.DefaultFleetName(server.URL)
+	if _, err := tokencache.Load(filepath.Join(home, ".ksctl", "cache", "tokens"), fleet, "admin"); !os.IsNotExist(err) {
+		t.Fatalf("Load token cache error = %v, want not exist", err)
+	}
+}
+
+func TestLoginRejectsMultipleEndpoints(t *testing.T) {
+	cmd := NewRootCommand(IOStreams{In: strings.NewReader(""), Out: io.Discard, ErrOut: io.Discard}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"auth", "login", "https://one.example.com", "https://two.example.com"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "accepts at most 1 arg(s)") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func newLoginTestRoot(prompter *commandPrompter) *cobra.Command {
+	root := &cobra.Command{Use: "ksctl", SilenceErrors: true, SilenceUsage: true}
+	root.SetIn(strings.NewReader(""))
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+
+	oauth := auth.NewOAuth(clientkubesphere.NewRESTClientFactory(nil))
+	authCommand := &cobra.Command{Use: "auth"}
+	authCommand.AddCommand(newLoginCommandWithPrompter(
+		"ksctl/test",
+		oauth,
+		func(_ io.Reader, writer io.Writer) authcmd.Prompter {
+			prompter.writer = writer
+			return prompter
+		},
+	))
+	root.AddCommand(authCommand)
+	return root
+}
 
 func TestLoginWritesConfigAndTokenCache(t *testing.T) {
 	home := t.TempDir()
@@ -56,7 +210,7 @@ func TestLoginWritesConfigAndTokenCache(t *testing.T) {
 	defer server.Close()
 
 	out := new(bytes.Buffer)
-	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd := NewRootCommand(IOStreams{In: strings.NewReader(""), Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
 	cmd.SetArgs([]string{"auth", "login", server.URL, "--username", "admin", "--password", "temporary-password", "--fleet", "prod", "--context", "prod-admin"})
 
 	if err := cmd.Execute(); err != nil {
@@ -107,8 +261,8 @@ func TestLoginDerivesFleetAndContextWithoutUsingExistingContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	fleetName := defaultLoginFleetName(server.URL)
-	contextName := tokencache.SafeName(fleetName + "-admin")
+	fleetName := authcmd.DefaultFleetName(server.URL)
+	contextName := authcmd.DefaultContextName(fleetName, "admin")
 	cfg := config.New()
 	cfg.Fleets["existing"] = config.Fleet{Host: "https://existing.example.com", Users: map[string]config.User{"admin": {Username: "admin"}}}
 	cfg.Contexts[contextName] = config.Context{Fleet: "existing", User: "admin"}
@@ -116,10 +270,14 @@ func TestLoginDerivesFleetAndContextWithoutUsingExistingContext(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	prompter := &commandPrompter{}
+	cmd := newLoginTestRoot(prompter)
 	cmd.SetArgs([]string{"auth", "login", server.URL, "--username", "admin", "--password", "temporary-password"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(prompter.prompts) != 0 {
+		t.Fatalf("prompts = %#v, want none", prompter.prompts)
 	}
 	loaded, err := config.Load(configPath)
 	if err != nil {
@@ -207,21 +365,6 @@ func TestLogoutReturnsBrokenContextReferenceErrors(t *testing.T) {
 				t.Fatalf("Execute() error = %v, want %q", err, test.want)
 			}
 		})
-	}
-}
-
-func TestLoginCommandDoesNotDefineInsecureFlag(t *testing.T) {
-	cmd := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
-	auth := findSubcommand(cmd, "auth")
-	if auth == nil {
-		t.Fatal("auth command is not registered")
-	}
-	login := findSubcommand(auth, "login")
-	if login == nil {
-		t.Fatal("login command is not registered")
-	}
-	if login.Flags().Lookup("insecure-skip-tls-verify") != nil {
-		t.Fatal("login defines --insecure-skip-tls-verify")
 	}
 }
 

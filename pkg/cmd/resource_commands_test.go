@@ -28,7 +28,6 @@ func TestNativeGetThroughKSApiServer(t *testing.T) {
 		"get", "workspaces",
 		"--endpoint", server.URL,
 		"--token", "secret",
-		"--no-interactive",
 		"-o", "json",
 	})
 
@@ -53,7 +52,6 @@ func TestNativeGetResolvesShortNameWithCoreDiscoveryFallback(t *testing.T) {
 		"get", "po", "--all-namespaces",
 		"--endpoint", server.URL,
 		"--token", "secret",
-		"--no-interactive",
 		"-o", "json",
 	})
 
@@ -76,7 +74,6 @@ func TestNativeGetResolvesCustomResourceWithCoreDiscoveryFallback(t *testing.T) 
 		"get", "widgets.example.io",
 		"--endpoint", server.URL,
 		"--token", "secret",
-		"--no-interactive",
 		"-o", "json",
 	})
 
@@ -99,7 +96,6 @@ func TestNativeGetResolvesBuiltInResourceWithCoreDiscoveryFallback(t *testing.T)
 		"get", "deploy", "--all-namespaces",
 		"--endpoint", server.URL,
 		"--token", "secret",
-		"--no-interactive",
 		"-o", "json",
 	})
 
@@ -123,7 +119,6 @@ func TestNativeGetThroughSpecifiedCluster(t *testing.T) {
 		"--endpoint", server.URL,
 		"--token", "secret",
 		"--cluster", "host",
-		"--no-interactive",
 		"-o", "json",
 	})
 	if err := cmd.Execute(); err != nil {
@@ -205,7 +200,6 @@ func TestNativeGetCoreResourceThroughClusterWhenScopedDiscoveryFails(t *testing.
 		"--endpoint", server.URL,
 		"--token", "secret",
 		"--cluster", "host",
-		"--no-interactive",
 		"-o", "json",
 	})
 	if err := cmd.Execute(); err != nil {
@@ -256,7 +250,6 @@ func TestNativeDescribeUsesContextDefaultCluster(t *testing.T) {
 		"--namespace", "default",
 		"--token", "secret",
 		"--show-events=false",
-		"--no-interactive",
 	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -277,7 +270,6 @@ func TestNativeDescribeThroughKSApiServer(t *testing.T) {
 		"describe", "workspace", "demo",
 		"--endpoint", server.URL,
 		"--token", "secret",
-		"--no-interactive",
 		"--show-events=false",
 	})
 
@@ -389,7 +381,7 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
-	cmd.SetArgs([]string{"get", "workspaces", "--no-interactive", "-o", "json"})
+	cmd.SetArgs([]string{"get", "workspaces", "-o", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

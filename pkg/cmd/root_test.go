@@ -30,7 +30,7 @@ func TestRootVersionPrintsClientAndTargetVersions(t *testing.T) {
 
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "v0.1.0"})
-	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret", "--cluster", "member", "--no-interactive"})
+	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret", "--cluster", "member"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -68,7 +68,7 @@ func TestRootVersionUsesContextDefaultCluster(t *testing.T) {
 
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "v0.1.0"})
-	cmd.SetArgs([]string{"version", "--token", "secret", "--no-interactive"})
+	cmd.SetArgs([]string{"version", "--token", "secret"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRootVersionUsesUnknownForMissingServerField(t *testing.T) {
 
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
-	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret", "--no-interactive"})
+	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -111,7 +111,7 @@ func TestRootVersionUsesUnknownForServerControlCharacters(t *testing.T) {
 
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
-	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret", "--no-interactive"})
+	cmd.SetArgs([]string{"version", "--endpoint", server.URL, "--token", "secret"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -128,7 +128,7 @@ func TestRootVersionFallsBackToUnknownWithoutServer(t *testing.T) {
 	t.Setenv("KS_TOKEN", "")
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
-	cmd.SetArgs([]string{"version", "--no-interactive"})
+	cmd.SetArgs([]string{"version"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -203,12 +203,15 @@ func TestRootConnectionFlags(t *testing.T) {
 		"workspace",
 		"namespace",
 		"request-timeout",
-		"insecure-skip-tls-verify",
-		"no-interactive",
 		"v",
 	} {
 		if cmd.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("persistent flag --%s is not registered", name)
+		}
+	}
+	for _, name := range []string{"insecure-skip-tls-verify", "no-interactive"} {
+		if cmd.PersistentFlags().Lookup(name) != nil {
+			t.Errorf("persistent flag --%s is registered", name)
 		}
 	}
 }
@@ -219,7 +222,7 @@ func TestRootAcceptsVerbosityFlag(t *testing.T) {
 	t.Setenv("KS_TOKEN", "")
 	streams := IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}
 	cmd := NewRootCommand(streams, VersionInfo{Version: "dev"})
-	cmd.SetArgs([]string{"-v=8", "version", "--no-interactive"})
+	cmd.SetArgs([]string{"-v=8", "version"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
