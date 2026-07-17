@@ -32,14 +32,18 @@ make build
 
 ## 快速开始
 
-登录 KubeSphere。密码只用于本次请求，不会写入配置文件。
+登录 KubeSphere。
 
-```bash
-export KS_PASSWORD='your-password'
-./bin/ksctl auth login https://kubesphere.example.com \
-  --username admin \
-  --password "$KS_PASSWORD" \
-  --context local
+当前版本输入密码时内容可见，但密码只用于本次登录请求，不会落盘。
+
+```text
+$ ./bin/ksctl auth login
+endpoint: https://kubesphere.example.com
+username: admin
+password: your-password
+fleet [kubesphere.example.com]:
+context [kubesphere.example.com-admin]:
+Logged in to "kubesphere.example.com-admin"
 ```
 
 登录后新 Context 会被设为当前 Context，后续命令可以直接使用其中的 API
@@ -72,7 +76,7 @@ ksctl [command] [TYPE] [NAME] [flags]
 | --- | --- |
 | `ksctl get TYPE [NAME]` | 显示一个或多个资源。 |
 | `ksctl describe TYPE [NAME]` | 显示资源的详细状态及相关信息。 |
-| `ksctl auth login ENDPOINT` | 使用用户名和密码认证，并保存 Context 和 Token 缓存。 |
+| `ksctl auth login [ENDPOINT]` | 使用用户名和密码认证，并保存 Context 和 Token 缓存。 |
 | `ksctl auth logout [CONTEXT]` | 删除指定 Context 的缓存凭证。 |
 | `ksctl config view` | 显示合并后的 ksctl 配置。 |
 | `ksctl config current-context` | 显示当前 Context 名称。 |
@@ -93,8 +97,6 @@ Kubernetes 资源。
 | `--endpoint URL` | 覆盖 KubeSphere API 地址。 |
 | `--token TOKEN` | 覆盖 Bearer Token。 |
 | `--request-timeout DURATION` | 设置单个服务端请求的超时时间。 |
-| `--no-interactive` | 缺少输入时直接失败，不进行交互提示。 |
-| `--insecure-skip-tls-verify` | 跳过服务端证书校验。 |
 
 `KS_ENDPOINT` 和 `KS_TOKEN` 可分别提供 API 地址和 Token 的默认值。显式指定的
 命令行参数优先级更高。
@@ -221,11 +223,21 @@ Token 过期时会尽量使用 Refresh Token 自动刷新；缓存不可用且 C
 
 登录时可通过 `--fleet` 指定 Fleet 名；省略时根据本次 Endpoint Host 生成。
 省略 `--context` 时，Context 默认为 `<fleet>-<username>`，且不会从已有 Context
-推断 Fleet：
+推断 Fleet。
+
+在交互式终端中，省略 Endpoint、Username 或 Password 中任意一项会启动引导式
+登录。补齐缺少的必填项后，Fleet 与 Context 提示会显示派生的默认值；直接回车
+接受默认值，输入其他内容则覆盖默认值。Endpoint、Username 和 Password 全部
+提供时，ksctl 不进行任何提示，并静默生成省略的 Fleet 与 Context 名，因此
+自动化环境不需要额外的非交互参数。
 
 ```bash
+export KS_PASSWORD='your-password'
 ksctl auth login https://prod.example.com \
-  --fleet prod --username admin --password '<password>'
+  --username admin \
+  --password "$KS_PASSWORD" \
+  --fleet prod \
+  --context prod-admin
 ```
 
 删除当前或指定 Context 的登录缓存：

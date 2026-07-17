@@ -33,15 +33,18 @@ Check the resulting binary:
 
 ## Quick start
 
-Log in to KubeSphere. The password is used only for this request and is not
-written to the configuration file.
+Log in to KubeSphere.
 
-```bash
-export KS_PASSWORD='your-password'
-./bin/ksctl auth login https://kubesphere.example.com \
-  --username admin \
-  --password "$KS_PASSWORD" \
-  --context local
+The password is visible while it is entered in this version, but it is used only for the login request and is never persisted.
+
+```text
+$ ./bin/ksctl auth login
+endpoint: https://kubesphere.example.com
+username: admin
+password: your-password
+fleet [kubesphere.example.com]:
+context [kubesphere.example.com-admin]:
+Logged in to "kubesphere.example.com-admin"
 ```
 
 The new context becomes current after login, so subsequent commands can use its
@@ -75,7 +78,7 @@ Use `ksctl help`, `ksctl <command> --help`, or
 | --- | --- |
 | `ksctl get TYPE [NAME]` | Display one or more resources. |
 | `ksctl describe TYPE [NAME]` | Display detailed resource state and related information. |
-| `ksctl auth login ENDPOINT` | Authenticate with a username and password, then save the context and token cache. |
+| `ksctl auth login [ENDPOINT]` | Authenticate with a username and password, then save the context and token cache. |
 | `ksctl auth logout [CONTEXT]` | Delete cached credentials for a context. |
 | `ksctl config view` | Display the merged ksctl configuration. |
 | `ksctl config current-context` | Display the current context name. |
@@ -96,8 +99,6 @@ resources at different levels.
 | `--endpoint URL` | Override the KubeSphere API endpoint. |
 | `--token TOKEN` | Override the bearer token. |
 | `--request-timeout DURATION` | Set the timeout for a single server request. |
-| `--no-interactive` | Fail instead of prompting for missing input. |
-| `--insecure-skip-tls-verify` | Skip server certificate validation. |
 
 `KS_ENDPOINT` and `KS_TOKEN` provide endpoint and token defaults. Explicit
 command-line flags take precedence.
@@ -232,11 +233,22 @@ cache and logout state. Old Context-level cache files are not read or migrated.
 
 Use `--fleet` to choose a Fleet name during login. Without it, ksctl derives
 the Fleet name from the Endpoint Host. Without `--context`, the Context name is
-`<fleet>-<username>`; existing Contexts are never used to infer a Fleet:
+`<fleet>-<username>`; existing Contexts are never used to infer a Fleet.
+
+In an interactive terminal, omitting Endpoint, Username, or Password starts the
+guided login flow. After the missing required values are supplied, Fleet and
+Context prompts display their derived defaults; press Enter to accept a default
+or type a replacement. When Endpoint, Username, and Password are all supplied,
+ksctl logs in without prompting and silently derives omitted Fleet and Context
+names, so no separate non-interactive flag is required for automation.
 
 ```bash
+export KS_PASSWORD='your-password'
 ksctl auth login https://prod.example.com \
-  --fleet prod --username admin --password '<password>'
+  --username admin \
+  --password "$KS_PASSWORD" \
+  --fleet prod \
+  --context prod-admin
 ```
 
 To remove the cache for the current or a named Context:
