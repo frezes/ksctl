@@ -51,13 +51,17 @@ func newConfigCommand(streams IOStreams) *cobra.Command {
 		},
 	})
 
-	cmd.AddCommand(&cobra.Command{
+	var raw bool
+	view := &cobra.Command{
 		Use:   "view",
 		Short: "Display merged ksctl config",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(config.DefaultPath())
 			if err != nil {
 				return err
+			}
+			if !raw {
+				cfg = config.RedactedCopy(cfg)
 			}
 			data, err := config.Marshal(cfg)
 			if err != nil {
@@ -66,7 +70,9 @@ func newConfigCommand(streams IOStreams) *cobra.Command {
 			_, err = cmd.OutOrStdout().Write(data)
 			return err
 		},
-	})
+	}
+	view.Flags().BoolVar(&raw, "raw", false, "Display raw config values, including credentials")
+	cmd.AddCommand(view)
 
 	return cmd
 }

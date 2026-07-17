@@ -6,10 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
+
+	"github.com/kubesphere/ksctl/internal/securefile"
 )
 
 var unsafePathChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
+
+const upperHex = "0123456789ABCDEF"
 
 type Response struct {
 	AccessToken  string `json:"access_token"`
@@ -54,7 +59,32 @@ func DefaultDir() string {
 }
 
 func Path(dir, fleet, user string) string {
-	return filepath.Join(dir, SafeName(fleet), SafeName(user)+".json")
+	return filepath.Join(dir, encodePathSegment(fleet), encodePathSegment(user)+".json")
+}
+
+func encodePathSegment(value string) string {
+	if value == "" {
+		return "~"
+	}
+	var encoded strings.Builder
+	for _, char := range []byte(value) {
+		if char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' ||
+			char >= '0' && char <= '9' || char == '_' || char == '-' || char == '.' {
+			encoded.WriteByte(char)
+			continue
+		}
+		encoded.WriteByte('~')
+		encoded.WriteByte(upperHex[char>>4])
+		encoded.WriteByte(upperHex[char&0x0f])
+	}
+	name := encoded.String()
+	if name == "." {
+		return "~2E"
+	}
+	if name == ".." {
+		return "~2E~2E"
+	}
+	return name
 }
 
 func SafeName(value string) string {
@@ -78,15 +108,11 @@ func Load(dir, fleet, user string) (Entry, error) {
 }
 
 func Save(dir, fleet, user string, entry Entry) error {
-	fleetDir := filepath.Join(dir, SafeName(fleet))
-	if err := os.MkdirAll(fleetDir, 0o700); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(Path(dir, fleet, user), data, 0o600)
+	return securefile.Write(Path(dir, fleet, user), data)
 }
 
 func Delete(dir, fleet, user string) error {

@@ -54,7 +54,7 @@ func TestResolveUsesActiveContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	if got.Endpoint != "https://config.example.com" || got.Username != "administrator" || got.Password != "configured-password" || got.Fleet != "prod-fleet" || got.User != "admin" || got.Cluster != "host" || got.Workspace != "" || got.TLSClientConfig.ServerName != "ks.example.com" || got.TLSClientConfig.CAData != "ca-data" {
+	if got.Endpoint != "https://config.example.com" || got.Username != "administrator" || got.Password != "configured-password" || got.Fleet != "prod-fleet" || got.User != "admin" || got.Cluster != "host" || got.TLSClientConfig.ServerName != "ks.example.com" || got.TLSClientConfig.CAData != "ca-data" {
 		t.Fatalf("resolved = %#v", got)
 	}
 }

@@ -17,9 +17,31 @@ and event handling.
 - A reachable KubeSphere 4.x API endpoint
 - A KubeSphere account or bearer token
 
+## Install a release
+
+Release archives are available for Linux and macOS on amd64 and arm64. Choose
+the standalone `ksctl_VERSION_OS_ARCH.tar.gz` archive or the kubectl plugin
+`kubectl-ks_VERSION_OS_ARCH.tar.gz` archive from the GitHub Release.
+
+For example, install the macOS arm64 standalone binary:
+
+```bash
+version=v0.1.0
+archive="ksctl_${version#v}_darwin_arm64.tar.gz"
+curl -LO "https://github.com/frezes/ksctl/releases/download/${version}/${archive}"
+curl -LO "https://github.com/frezes/ksctl/releases/download/${version}/checksums.txt"
+grep "  ${archive}$" checksums.txt | shasum -a 256 -c -
+tar -xzf "${archive}"
+sudo install -m 0755 ksctl /usr/local/bin/ksctl
+```
+
+On Linux, verify with `sha256sum -c -` instead of `shasum -a 256 -c -`.
+To install the plugin, select the matching `kubectl-ks` archive and place the
+extracted `kubectl-ks` executable on `PATH`; invoke it as `kubectl ks`.
+
 ## Build from source
 
-Build `ksctl` into `bin/ksctl`:
+Build `ksctl` and `kubectl-ks` into `bin/`:
 
 ```bash
 make build
@@ -35,7 +57,8 @@ Check the resulting binary:
 
 Log in to KubeSphere.
 
-The password is visible while it is entered in this version, but it is used only for the login request and is never persisted.
+When stdin is a terminal, ksctl reads the password without echoing it. The
+password is used only for the login request and is never persisted.
 
 ```text
 $ ./bin/ksctl auth login
@@ -94,7 +117,6 @@ resources at different levels.
 | --- | --- |
 | `--context NAME` | Use a named ksctl context. |
 | `--cluster NAME` | Select a KubeSphere cluster. |
-| `--workspace NAME` | Select a KubeSphere workspace. |
 | `-n, --namespace NAME` | Select a Kubernetes namespace or KubeSphere project. |
 | `--endpoint URL` | Override the KubeSphere API endpoint. |
 | `--token TOKEN` | Override the bearer token. |
@@ -159,6 +181,10 @@ ksctl get workspaces \
 
 ksctl uses `~/.ksctl/config.yaml`, independently of kubeconfig. Set
 `KSCTL_CONFIG` to use another path.
+
+`ksctl config view` redacts stored passwords, bearer tokens, and TLS private
+key data. Use `ksctl config view --raw` only when the unredacted values are
+required, and do not send raw output to logs or issue reports.
 
 ```yaml
 apiVersion: ksctl.kubesphere.io/v1alpha1
@@ -260,14 +286,17 @@ ksctl auth logout local
 
 ## Development
 
-The Makefile exposes three development targets:
+The Makefile exposes these development targets:
 
 ```bash
 make build
 make test
+make verify
 make clean
 ```
 
-- `build` creates `bin/ksctl`.
+- `build` creates `bin/ksctl` and `bin/kubectl-ks`.
 - `test` runs all Go tests.
-- `clean` removes `bin/ksctl`.
+- `verify` is the local release gate: it checks formatting and module metadata,
+  then runs vet, normal tests, race tests, and both builds.
+- `clean` removes both binaries.

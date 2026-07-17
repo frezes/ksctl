@@ -19,6 +19,7 @@ type Input struct {
 type Prompter interface {
 	Available() bool
 	ReadLine(string) (string, error)
+	ReadPassword(string) (string, error)
 }
 
 type ResolveOptions struct {
@@ -56,9 +57,12 @@ func Resolve(options ResolveOptions) (Input, error) {
 		}
 	}
 	if resolved.Password == "" {
-		value, err := readRequired(options.Prompter, interactive, "password", "password: ", "error: --password is required")
+		if !interactive {
+			return Input{}, fmt.Errorf("error: --password is required")
+		}
+		value, err := options.Prompter.ReadPassword("password: ")
 		if err != nil {
-			return Input{}, err
+			return Input{}, fmt.Errorf("error: read password: %w", err)
 		}
 		resolved.Password = value
 		if resolved.Password == "" {

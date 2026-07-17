@@ -137,3 +137,20 @@ func TestLoadDoesNotMapRootUsersToFleets(t *testing.T) {
 		t.Fatalf("root users were mapped into fleet: %#v", got)
 	}
 }
+
+func TestSaveReplacesBroadConfigPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, New()); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, want 0600", info.Mode().Perm())
+	}
+}

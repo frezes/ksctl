@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,6 +154,55 @@ func TestRootHelpUsesCommandName(t *testing.T) {
 	}
 }
 
+func TestRootHelpUsesEnglishRegardlessOfLocale(t *testing.T) {
+	const helperEnv = "KSCTL_TEST_ENGLISH_HELP"
+	if os.Getenv(helperEnv) == "1" {
+		out := new(bytes.Buffer)
+		cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+		cmd.SetArgs([]string{"--help"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		help := out.String()
+		for _, want := range []string{
+			"describe    Show details of a specific resource or group of resources",
+			"get         Display one or many resources",
+		} {
+			if !strings.Contains(help, want) {
+				t.Fatalf("help does not contain %q: %s", want, help)
+			}
+		}
+		return
+	}
+
+	helper := exec.Command(os.Args[0], "-test.run=^TestRootHelpUsesEnglishRegardlessOfLocale$")
+	helper.Env = append(os.Environ(),
+		helperEnv+"=1",
+		"LC_ALL=zh_CN.UTF-8",
+		"LC_MESSAGES=zh_CN.UTF-8",
+		"LANG=zh_CN.UTF-8",
+	)
+	if output, err := helper.CombinedOutput(); err != nil {
+		t.Fatalf("localized help subprocess failed: %v\n%s", err, output)
+	}
+}
+
+func TestKubectlPluginHelpUsesDisplayName(t *testing.T) {
+	out := new(bytes.Buffer)
+	cmd := NewKubectlPluginCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"get", "--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	help := out.String()
+	if !strings.Contains(help, "Usage:\n  kubectl ks get") || strings.Contains(help, "Usage:\n  kubectl get") {
+		t.Fatalf("plugin help = %q", help)
+	}
+	if !strings.Contains(help, "kubectl ks get pods") || strings.Contains(help, "kubectl get pods") {
+		t.Fatalf("plugin examples should use kubectl ks: %q", help)
+	}
+}
+
 func TestRootRegistersNativeResourceCommands(t *testing.T) {
 	cmd := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
 
@@ -200,7 +251,6 @@ func TestRootConnectionFlags(t *testing.T) {
 		"token",
 		"context",
 		"cluster",
-		"workspace",
 		"namespace",
 		"request-timeout",
 		"v",
@@ -209,7 +259,7 @@ func TestRootConnectionFlags(t *testing.T) {
 			t.Errorf("persistent flag --%s is not registered", name)
 		}
 	}
-	for _, name := range []string{"insecure-skip-tls-verify", "no-interactive"} {
+	for _, name := range []string{"insecure-skip-tls-verify", "no-interactive", "workspace"} {
 		if cmd.PersistentFlags().Lookup(name) != nil {
 			t.Errorf("persistent flag --%s is registered", name)
 		}

@@ -3,6 +3,7 @@ package token
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -113,5 +114,57 @@ func TestCacheDoesNotReadFlatContextCache(t *testing.T) {
 	}
 	if _, err := Load(dir, "old-context", "admin"); !os.IsNotExist(err) {
 		t.Fatalf("Load() error = %v, want not exist", err)
+	}
+}
+
+func TestPathEncodesUnsafeComponentsWithoutCollisions(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		fleet string
+		user  string
+		want  string
+	}{
+		{fleet: "prod", user: "admin", want: filepath.Join(dir, "prod", "admin.json")},
+		{fleet: ".", user: "..", want: filepath.Join(dir, "~2E", "~2E~2E.json")},
+		{fleet: "a/b", user: "x:y", want: filepath.Join(dir, "a~2Fb", "x~3Ay.json")},
+		{fleet: "a:b", user: "x/y", want: filepath.Join(dir, "a~3Ab", "x~2Fy.json")},
+		{fleet: "", user: "~", want: filepath.Join(dir, "~", "~7E.json")},
+	}
+	seen := map[string]bool{}
+	for _, test := range tests {
+		got := Path(dir, test.fleet, test.user)
+		if got != test.want {
+			t.Errorf("Path(%q, %q) = %q, want %q", test.fleet, test.user, got, test.want)
+		}
+		if seen[got] {
+			t.Errorf("Path() collision at %q", got)
+		}
+		seen[got] = true
+		rel, err := filepath.Rel(dir, got)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Errorf("Path() escaped cache dir: rel=%q err=%v", rel, err)
+		}
+	}
+}
+
+func TestSaveReplacesBroadCachePermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := Path(dir, "prod", "admin")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := NewEntry(Response{AccessToken: "secret", ExpiresIn: 60}, time.Now())
+	if err := Save(dir, "prod", "admin", entry); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, want 0600", info.Mode().Perm())
 	}
 }

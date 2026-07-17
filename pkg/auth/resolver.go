@@ -12,7 +12,6 @@ type ResolveInput struct {
 	TokenFlag     string
 	ContextFlag   string
 	ClusterFlag   string
-	WorkspaceFlag string
 	NoInteractive bool
 	Env           map[string]string
 	Config        *config.Config
@@ -29,7 +28,6 @@ type Resolved struct {
 	Fleet           string
 	User            string
 	Cluster         string
-	Workspace       string
 	TLSClientConfig config.TLSClientConfig
 }
 
@@ -51,7 +49,6 @@ func Resolve(in ResolveInput) (Resolved, error) {
 		ExplicitToken: firstNonEmpty(in.TokenFlag, env["KS_TOKEN"]),
 		Context:       firstNonEmpty(in.ContextFlag, cfg.CurrentContext),
 		Cluster:       in.ClusterFlag,
-		Workspace:     in.WorkspaceFlag,
 	}
 
 	resolveContext := out.Context != "" && (in.ContextFlag != "" || out.Endpoint == "" || out.ExplicitToken == "")

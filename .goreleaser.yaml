@@ -1,0 +1,46 @@
+version: 2
+
+project_name: ksctl
+
+builds:
+  - id: ksctl
+    main: ./cmd/ksctl
+    binary: ksctl
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/kubesphere/ksctl/pkg/cmd.version=v{{ .Version }}
+  - id: kubectl-ks
+    main: ./cmd/kubectl-ks
+    binary: kubectl-ks
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/kubesphere/ksctl/pkg/cmd.version=v{{ .Version }}
+
+archives:
+  - id: ksctl
+    ids: [ksctl]
+    formats: [tar.gz]
+    name_template: ksctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  - id: kubectl-ks
+    ids: [kubectl-ks]
+    formats: [tar.gz]
+    name_template: kubectl-ks_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
