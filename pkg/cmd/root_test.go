@@ -228,6 +228,40 @@ func TestRootRegistersNativeResourceCommands(t *testing.T) {
 	}
 }
 
+func TestRootRegistersPluginListCommand(t *testing.T) {
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	plugin := findSubcommand(root, "plugin")
+	if plugin == nil || findSubcommand(plugin, "list") == nil {
+		t.Fatal("plugin list command is not registered")
+	}
+	if findSubcommand(plugin, "list").Flags().Lookup("name-only") == nil {
+		t.Fatal("plugin list --name-only is not registered")
+	}
+}
+
+func TestPluginHelpUsesEntrypointDisplayName(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		root *cobra.Command
+		want string
+	}{
+		{name: "standalone", root: NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}), want: "ksctl plugin list"},
+		{name: "kubectl", root: NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}), want: "kubectl ks plugin list"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			out := new(bytes.Buffer)
+			test.root.SetOut(out)
+			test.root.SetArgs([]string{"plugin", "list", "--help"})
+			if err := test.root.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if !strings.Contains(out.String(), test.want) {
+				t.Fatalf("help = %q, want %q", out.String(), test.want)
+			}
+		})
+	}
+}
+
 func TestRootRegistersNestedAuthCommands(t *testing.T) {
 	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
 	auth := findSubcommand(root, "auth")

@@ -104,7 +104,40 @@ ksctl [command] [TYPE] [NAME] [flags]
 | `ksctl config view` | 显示合并后的 ksctl 配置。 |
 | `ksctl config current-context` | 显示当前 Context 名称。 |
 | `ksctl config use-context NAME` | 选择已有 Context。 |
+| `ksctl config generate kubeconfig` | 将当前登录用户的 kubeconfig 写入标准输出。 |
+| `ksctl plugin list` | 列出并诊断 `PATH` 中的 `ksctl-*` 可执行插件。 |
 | `ksctl version` | 显示 ksctl、KubeSphere 和 Kubernetes 版本。 |
+
+## 插件
+
+ksctl 支持 kubectl 风格的可执行插件。插件是位于 `PATH` 中、名称以
+`ksctl-` 开头的可执行文件。例如，`ksctl-foo` 同时提供以下两个入口：
+
+```bash
+ksctl foo [arguments and flags]
+kubectl ks foo [arguments and flags]
+```
+
+嵌套命令词以连字符连接。同时存在 `ksctl-foo` 和 `ksctl-foo-bar` 时，
+`ksctl foo bar` 优先选择 `ksctl-foo-bar`；未匹配的命令词和后续参数会原样
+传递给插件。命令词中的连字符映射为可执行文件名中的下划线，因此
+`ksctl foo-bar` 可以调用 `ksctl-foo_bar`。
+
+使用以下命令列出候选插件，并检查执行权限、PATH 遮蔽和内置命令冲突：
+
+```bash
+ksctl plugin list
+ksctl plugin list --name-only
+```
+
+列表命令会在每个候选插件之后输出其诊断信息；发现警告时返回非零状态。
+插件不能覆盖或扩展内置命令。插件名称必须出现在其参数之前：应使用
+`ksctl foo --context prod`，而不是 `ksctl --context prod foo`。ksctl 会原样
+传递参数和继承的环境变量；插件需要自行解析参数并获取所需的连接配置。
+
+插件是以当前用户权限运行的任意程序。ksctl 不会审计或隔离插件，因此只应安装
+和运行可信插件。兼容的可执行文件命名和分发规则参见
+[kubectl 插件文档](https://kubernetes.io/zh-cn/docs/tasks/extend-kubectl/kubectl-plugins/)。
 
 ## 作用域和连接参数
 
@@ -218,13 +251,21 @@ contexts:
 块不会输出；`defaultCluster` 始终输出，默认值为空字符串。根级 `users` 不会被
 读取或迁移。
 
-使用配置命令查看或切换 Context：
+使用配置命令查看或切换 Context，并获取当前登录用户的 kubeconfig：
 
 ```bash
 ksctl config view
 ksctl config current-context
 ksctl config use-context prod-admin
+umask 077
+ksctl config generate kubeconfig > member.kubeconfig
+ksctl config generate kubeconfig --cluster member-1 > member-1.kubeconfig
 ```
+
+生成 kubeconfig 时必须选择一个已登录的 Context。显式 `--cluster` 会覆盖该
+Context 的 `defaultCluster`，未指定时使用默认集群。命令将 kubeconfig 原样写入
+标准输出，不会合并到 `~/.kube/config`。kubeconfig 包含凭证；重定向到文件前应
+设置 `077` 等严格的 umask。
 
 ## 认证
 
