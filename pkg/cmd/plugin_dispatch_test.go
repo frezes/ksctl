@@ -174,7 +174,7 @@ func TestDefaultPluginHandlerExecutesForBothEntrypoints(t *testing.T) {
 
 	pluginDirectory := t.TempDir()
 	pluginPath := filepath.Join(pluginDirectory, "ksctl-probe")
-	plugin := "#!/bin/sh\nIFS= read -r input\nprintf 'arg1=%s\\narg2=%s\\nenv=%s\\nstdin=%s\\n' \"$1\" \"$2\" \"$KSCTL_PLUGIN_VISIBLE\" \"$input\"\nexit 7\n"
+	plugin := "#!/bin/sh\nIFS= read -r input\nprintf 'arg1=%s\\narg2=%s\\nenv=%s\\nstdin=%s\\n' \"$1\" \"$2\" \"$KSCTL_PLUGIN_VISIBLE\" \"$input\"\nprintf 'stderr=%s\\n' \"$KSCTL_PLUGIN_VISIBLE\" >&2\nexit 7\n"
 	if err := os.WriteFile(pluginPath, []byte(plugin), 0o755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -190,13 +190,20 @@ func TestDefaultPluginHandlerExecutesForBothEntrypoints(t *testing.T) {
 				"KSCTL_PLUGIN_VISIBLE=visible",
 				"PATH=" + pluginDirectory + string(os.PathListSeparator) + os.Getenv("PATH"),
 			}
-			output, err := helper.CombinedOutput()
+			stdout := new(bytes.Buffer)
+			stderr := new(bytes.Buffer)
+			helper.Stdout = stdout
+			helper.Stderr = stderr
+			err := helper.Run()
 			var exitError *exec.ExitError
 			if !errors.As(err, &exitError) || exitError.ExitCode() != 7 {
-				t.Fatalf("helper error = %v, output = %q", err, output)
+				t.Fatalf("helper error = %v, stdout = %q, stderr = %q", err, stdout, stderr)
 			}
-			if got, want := string(output), "arg1=first\narg2=--second=two\nenv=visible\nstdin=from-stdin\n"; got != want {
-				t.Fatalf("output = %q, want %q", got, want)
+			if got, want := stdout.String(), "arg1=first\narg2=--second=two\nenv=visible\nstdin=from-stdin\n"; got != want {
+				t.Fatalf("stdout = %q, want %q", got, want)
+			}
+			if got, want := stderr.String(), "stderr=visible\n"; got != want {
+				t.Fatalf("stderr = %q, want %q", got, want)
 			}
 		})
 	}

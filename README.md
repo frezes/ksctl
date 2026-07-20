@@ -134,9 +134,9 @@ ksctl plugin list
 ksctl plugin list --name-only
 ```
 
-The list command prints every candidate before its diagnostics and returns a
-non-zero status when warnings are found. Built-in commands cannot be replaced
-or extended by plugins. The plugin name must appear before its flags: use
+The list command prints each candidate before its associated diagnostics and
+returns a non-zero status when warnings are found. Built-in commands cannot be
+replaced or extended by plugins. The plugin name must appear before its flags: use
 `ksctl foo --context prod`, not `ksctl --context prod foo`. ksctl passes
 arguments and the inherited environment unchanged; each plugin must parse its
 own flags and obtain any connection settings it needs.

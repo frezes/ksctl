@@ -137,3 +137,38 @@ func TestPluginListSkipsMissingPATHEntry(t *testing.T) {
 		t.Fatalf("stderr = %q", errOut.String())
 	}
 }
+
+func TestPluginListSkipsUnreadablePATHEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory mode bits are Unix-specific")
+	}
+
+	unreadable := t.TempDir()
+	if err := os.Chmod(unreadable, 0); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(unreadable, 0o700); err != nil {
+			t.Errorf("restore directory permissions: %v", err)
+		}
+	})
+	if _, err := os.ReadDir(unreadable); err == nil {
+		t.Skip("current user can read a mode-000 directory")
+	}
+
+	valid := t.TempDir()
+	pluginPath := writeCandidate(t, valid, "ksctl-alpha", 0o755)
+	errOut := new(bytes.Buffer)
+	o := &listOptions{
+		verifier:    acceptingVerifier{},
+		pluginPaths: []string{unreadable, valid},
+		IOStreams:   genericiooptions.IOStreams{Out: new(bytes.Buffer), ErrOut: errOut},
+	}
+	plugins, errs := o.listPlugins()
+	if len(errs) != 0 || !reflect.DeepEqual(plugins, []string{pluginPath}) {
+		t.Fatalf("plugins = %v, errors = %v", plugins, errs)
+	}
+	if !strings.Contains(errOut.String(), "Unable to read directory") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}

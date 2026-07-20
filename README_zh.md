@@ -129,7 +129,7 @@ ksctl plugin list
 ksctl plugin list --name-only
 ```
 
-列表命令会先输出所有候选插件，再输出诊断信息；发现警告时返回非零状态。
+列表命令会在每个候选插件之后输出其诊断信息；发现警告时返回非零状态。
 插件不能覆盖或扩展内置命令。插件名称必须出现在其参数之前：应使用
 `ksctl foo --context prod`，而不是 `ksctl --context prod foo`。ksctl 会原样
 传递参数和继承的环境变量；插件需要自行解析参数并获取所需的连接配置。
