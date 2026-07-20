@@ -9,10 +9,11 @@ A plugin is an executable named `ksctl-<name>` that is available on `PATH`.
 Both `ksctl <name>` and `kubectl ks <name>` resolve and execute the same plugin,
 so ksctl has one plugin naming scheme and one plugin ecosystem.
 
-The implementation reuses kubectl v0.36.2's exported plugin lookup and
-execution behavior. ksctl owns a small dispatch adapter and a ksctl-specific
-`plugin list` command because kubectl's list command hard-codes the `kubectl-`
-prefix and kubectl-specific messages.
+The implementation follows kubectl v0.36.2's plugin lookup and execution
+behavior in a small standard-library adapter. Importing kubectl's exported
+handler through its top-level command package would activate unrelated command
+dependencies such as apply, exec, cp, and top. ksctl therefore owns the focused
+handler, dispatch adapter, and a ksctl-specific `plugin list` command.
 
 ## Goals
 
@@ -73,11 +74,11 @@ as `ksctl-auth-login` cannot replace or extend `ksctl auth login`.
 ## Command Construction and Dispatch
 
 `pkg/cmd` continues to own the Cobra command tree. It adds a construction path
-that accepts the raw process arguments and a kubectl `PluginHandler`. The
-existing constructors remain available for package callers and tests that only
-need a Cobra tree.
+that accepts the raw process arguments and an injectable local plugin handler.
+The existing constructors remain available for package callers and tests that
+only need a Cobra tree.
 
-The two binary entrypoints construct a kubectl `DefaultPluginHandler` with
+The two binary entrypoints construct ksctl's default handler with
 `[]string{"ksctl"}` and provide `os.Args`. Consequently, `cmd/ksctl` and
 `cmd/kubectl-ks` use identical plugin lookup even though their Cobra display
 names differ.
@@ -88,10 +89,10 @@ Dispatch happens before Cobra parses arguments:
 2. Inspect the raw command path with Cobra's `Find` behavior.
 3. If the path resolves to a built-in command, continue normal Cobra
    execution without looking for a plugin.
-4. If the top-level command is unknown, call kubectl's
-   `HandlePluginCommand` with the raw arguments and a minimum match length of
-   one command word.
-5. If a plugin is found, kubectl's handler replaces the process on Unix or
+4. If the top-level command is unknown, pass the raw arguments to the local
+   kubectl-compatible longest-name matcher with a minimum match length of one
+   command word.
+5. If a plugin is found, the handler replaces the process on Unix or
    runs the child process and exits on Windows.
 6. If no plugin is found, continue normal Cobra execution so the existing
    unknown-command error and suggestions are preserved.
@@ -116,8 +117,8 @@ kubectl ks plugin list
 ```
 
 The listing implementation lives in `pkg/cmd/plugin`, mirroring the upstream
-package boundary while using ksctl naming and messages. It does not copy the
-kubectl execution handler.
+package boundary while using ksctl naming and messages. Dispatch remains in
+`pkg/cmd` and does not import kubectl's top-level command package.
 
 `plugin list` performs these steps:
 
@@ -162,9 +163,9 @@ pkg/cmd/plugin
     build `plugin list`, scan PATH, and diagnose executable, shadowing, and
     built-in command conflicts
 
-k8s.io/kubectl/pkg/cmd
-    provide PluginHandler, DefaultPluginHandler, executable lookup, longest
-    name matching, argument/environment forwarding, and process execution
+Kubernetes kubectl v0.36.2 pkg/cmd/plugin.go
+    serve as the compatibility reference for executable lookup, longest-name
+    matching, argument/environment forwarding, and process execution
 ```
 
 No new module dependency is required because ksctl already depends on
@@ -188,7 +189,7 @@ No new module dependency is required because ksctl already depends on
 
 ## Testing
 
-Dispatch tests use an injected fake `PluginHandler` to verify:
+Dispatch tests use an injected fake local handler to verify:
 
 - longest-name lookup and fallback;
 - dash-to-underscore conversion;
