@@ -9,6 +9,7 @@ import (
 	"github.com/kubesphere/ksctl/pkg/auth"
 	clientkubernetes "github.com/kubesphere/ksctl/pkg/client/kubernetes"
 	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
+	plugincmd "github.com/kubesphere/ksctl/pkg/cmd/plugin"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
@@ -94,6 +95,7 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 		Out:    streams.Out,
 		ErrOut: streams.ErrOut,
 	}
+	cmd.AddCommand(plugincmd.NewCommand(cmd.DisplayName(), kubeStreams))
 	getCommand := get.NewCmdGet(cmd.DisplayName(), factory, kubeStreams)
 	getCommand.Example = strings.ReplaceAll(getCommand.Example, "kubectl ", cmd.DisplayName()+" ")
 	describeCommand := describecmd.NewCmdDescribe(cmd.DisplayName(), factory, kubeStreams)
