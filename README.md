@@ -106,6 +106,7 @@ Use `ksctl help`, `ksctl <command> --help`, or
 | `ksctl config view` | Display the merged ksctl configuration. |
 | `ksctl config current-context` | Display the current context name. |
 | `ksctl config use-context NAME` | Select an existing context. |
+| `ksctl config generate kubeconfig` | Write the current logged-in user's kubeconfig to stdout. |
 | `ksctl plugin list` | List and diagnose `ksctl-*` executable plugins on `PATH`. |
 | `ksctl version` | Display the ksctl, KubeSphere, and Kubernetes versions. |
 
@@ -261,13 +262,23 @@ maps, and an empty `tlsClientConfig` block are omitted; `defaultCluster` is
 always displayed and defaults to an empty string. Root-level `users` are not
 supported or migrated.
 
-Use the config commands to inspect or switch contexts:
+Use the config commands to inspect or switch contexts and to retrieve the
+selected login's kubeconfig:
 
 ```bash
 ksctl config view
 ksctl config current-context
 ksctl config use-context prod-admin
+umask 077
+ksctl config generate kubeconfig > member.kubeconfig
+ksctl config generate kubeconfig --cluster member-1 > member-1.kubeconfig
 ```
+
+Kubeconfig generation requires a selected login context. An explicit
+`--cluster` overrides that context's `defaultCluster`; otherwise the default is
+used. The kubeconfig is written unchanged to stdout and is never merged into
+`~/.kube/config`. Kubeconfig output contains credentials; use a restrictive
+umask such as `077` before redirecting it to a file.
 
 ## Authentication
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kubesphere/ksctl/pkg/auth"
+	clientoptions "github.com/kubesphere/ksctl/pkg/client"
 	"github.com/kubesphere/ksctl/pkg/config"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/discovery"
@@ -21,18 +22,7 @@ import (
 
 const clientConfigName = "ksctl"
 
-type Options struct {
-	Endpoint              string
-	Token                 string
-	Context               string
-	Cluster               string
-	Namespace             string
-	RequestTimeout        string
-	InsecureSkipTLSVerify bool
-	NoInteractive         bool
-	ConfigPath            string
-	UserAgent             string
-}
+type Options = clientoptions.Options
 
 type Dependencies struct {
 	TokenProvider auth.TokenProvider
@@ -154,6 +144,12 @@ func (g *RESTClientGetter) loadConfig() {
 			return
 		}
 		g.resolvedCluster = resolved.Cluster
+		if resolved.Cluster != "" {
+			if messages := rest.IsValidPathSegmentName(resolved.Cluster); len(messages) != 0 {
+				g.configErr = fmt.Errorf("invalid cluster %q: %v", resolved.Cluster, messages)
+				return
+			}
+		}
 
 		timeout, err := parseTimeout(g.options.RequestTimeout)
 		if err != nil {
@@ -173,10 +169,6 @@ func (g *RESTClientGetter) loadConfig() {
 		}
 		resourceEndpoint := resolved.Endpoint
 		if resolved.Cluster != "" {
-			if messages := rest.IsValidPathSegmentName(resolved.Cluster); len(messages) != 0 {
-				g.configErr = fmt.Errorf("invalid cluster %q: %v", resolved.Cluster, messages)
-				return
-			}
 			resourceEndpoint, err = url.JoinPath(resolved.Endpoint, "clusters", resolved.Cluster)
 			if err != nil {
 				g.configErr = fmt.Errorf("build endpoint for cluster %q: %w", resolved.Cluster, err)
