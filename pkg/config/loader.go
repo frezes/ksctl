@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kubesphere/ksctl/internal/securefile"
 	"sigs.k8s.io/yaml"
 )
 
@@ -61,8 +62,5 @@ func Save(path string, cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o600)
+	return securefile.Write(path, data)
 }

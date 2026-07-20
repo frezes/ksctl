@@ -43,3 +43,18 @@ func TestTerminalPrompterAvailability(t *testing.T) {
 		t.Fatal("plain strings.Reader must not be detected as a terminal")
 	}
 }
+
+func TestTerminalPrompterReadsPasswordWithoutEcho(t *testing.T) {
+	out := new(bytes.Buffer)
+	prompter := newTerminalPrompter(strings.NewReader(""), out, true)
+	prompter.readPassword = func() ([]byte, error) {
+		return []byte("hidden-secret"), nil
+	}
+	value, err := prompter.ReadPassword("password: ")
+	if err != nil || value != "hidden-secret" {
+		t.Fatalf("ReadPassword() = %q, %v", value, err)
+	}
+	if out.String() != "password: \n" || strings.Contains(out.String(), value) {
+		t.Fatalf("output = %q", out.String())
+	}
+}

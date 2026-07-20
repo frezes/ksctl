@@ -28,6 +28,14 @@ type commandPrompter struct {
 func (p *commandPrompter) Available() bool { return true }
 
 func (p *commandPrompter) ReadLine(prompt string) (string, error) {
+	return p.read(prompt)
+}
+
+func (p *commandPrompter) ReadPassword(prompt string) (string, error) {
+	return p.read(prompt)
+}
+
+func (p *commandPrompter) read(prompt string) (string, error) {
 	p.prompts = append(p.prompts, prompt)
 	if _, err := io.WriteString(p.writer, prompt); err != nil {
 		return "", err

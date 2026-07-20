@@ -26,7 +26,6 @@ type Options struct {
 	Token                 string
 	Context               string
 	Cluster               string
-	Workspace             string
 	Namespace             string
 	RequestTimeout        string
 	InsecureSkipTLSVerify bool
@@ -147,7 +146,6 @@ func (g *RESTClientGetter) loadConfig() {
 			TokenFlag:     g.options.Token,
 			ContextFlag:   g.options.Context,
 			ClusterFlag:   g.options.Cluster,
-			WorkspaceFlag: g.options.Workspace,
 			NoInteractive: g.options.NoInteractive,
 			Config:        cfg,
 		})

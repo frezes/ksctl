@@ -3,6 +3,8 @@ package cmd
 import (
 	"flag"
 	"io"
+	"strings"
+	"sync"
 
 	"github.com/kubesphere/ksctl/pkg/auth"
 	clientkubernetes "github.com/kubesphere/ksctl/pkg/client/kubernetes"
@@ -13,6 +15,12 @@ import (
 	describecmd "k8s.io/kubectl/pkg/cmd/describe"
 	"k8s.io/kubectl/pkg/cmd/get"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	kubectli18n "k8s.io/kubectl/pkg/util/i18n"
+)
+
+var (
+	loadEnglishTranslationsOnce sync.Once
+	loadEnglishTranslationsErr  error
 )
 
 type IOStreams struct {
@@ -22,6 +30,21 @@ type IOStreams struct {
 }
 
 func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
+	return newRootCommand("ksctl", "", streams, info)
+}
+
+func NewKubectlPluginCommand(streams IOStreams, info VersionInfo) *cobra.Command {
+	return newRootCommand("kubectl-ks", "kubectl ks", streams, info)
+}
+
+func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo) *cobra.Command {
+	loadEnglishTranslationsOnce.Do(func() {
+		loadEnglishTranslationsErr = kubectli18n.LoadTranslations("kubectl", func() string { return "default" })
+	})
+	if loadEnglishTranslationsErr != nil {
+		panic(loadEnglishTranslationsErr)
+	}
+
 	if streams.Out == nil {
 		streams.Out = io.Discard
 	}
@@ -30,10 +53,15 @@ func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:           "ksctl",
+		Use:           use,
 		Short:         "KubeSphere command line tool",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+	}
+	if displayName != "" {
+		cmd.Annotations = map[string]string{
+			cobra.CommandDisplayNameAnnotation: displayName,
+		}
 	}
 	cmd.SetOut(streams.Out)
 	cmd.SetErr(streams.ErrOut)
@@ -46,7 +74,6 @@ func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
 	cmd.PersistentFlags().StringVar(&connection.Token, "token", "", "KubeSphere bearer token")
 	cmd.PersistentFlags().StringVar(&connection.Context, "context", "", "ksctl context name")
 	cmd.PersistentFlags().StringVar(&connection.Cluster, "cluster", "", "KubeSphere cluster name")
-	cmd.PersistentFlags().StringVar(&connection.Workspace, "workspace", "", "KubeSphere workspace name")
 	cmd.PersistentFlags().StringVarP(&connection.Namespace, "namespace", "n", "", "Kubernetes namespace or KubeSphere project")
 	cmd.PersistentFlags().StringVar(&connection.RequestTimeout, "request-timeout", "0", "The length of time to wait before giving up on a single server request")
 	addKlogVerbosityFlag(cmd, streams.ErrOut)
@@ -67,8 +94,11 @@ func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
 		Out:    streams.Out,
 		ErrOut: streams.ErrOut,
 	}
-	cmd.AddCommand(get.NewCmdGet(cmd.Use, factory, kubeStreams))
-	cmd.AddCommand(describecmd.NewCmdDescribe(cmd.Use, factory, kubeStreams))
+	getCommand := get.NewCmdGet(cmd.DisplayName(), factory, kubeStreams)
+	getCommand.Example = strings.ReplaceAll(getCommand.Example, "kubectl ", cmd.DisplayName()+" ")
+	describeCommand := describecmd.NewCmdDescribe(cmd.DisplayName(), factory, kubeStreams)
+	describeCommand.Example = strings.ReplaceAll(describeCommand.Example, "kubectl ", cmd.DisplayName()+" ")
+	cmd.AddCommand(getCommand, describeCommand)
 
 	return cmd
 }

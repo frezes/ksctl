@@ -16,9 +16,31 @@ REST 映射、输出、选择器、监听、内置 Describer、通用 Describe
 - 可访问的 KubeSphere 4.x API 地址
 - KubeSphere 账号或 Bearer Token
 
+## 安装发布版本
+
+发布归档支持 Linux 和 macOS 的 amd64、arm64 架构。独立命令使用
+`ksctl_VERSION_OS_ARCH.tar.gz`，kubectl 插件使用
+`kubectl-ks_VERSION_OS_ARCH.tar.gz`。
+
+以下示例安装 macOS arm64 的独立命令：
+
+```bash
+version=v0.1.0
+archive="ksctl_${version#v}_darwin_arm64.tar.gz"
+curl -LO "https://github.com/frezes/ksctl/releases/download/${version}/${archive}"
+curl -LO "https://github.com/frezes/ksctl/releases/download/${version}/checksums.txt"
+grep "  ${archive}$" checksums.txt | shasum -a 256 -c -
+tar -xzf "${archive}"
+sudo install -m 0755 ksctl /usr/local/bin/ksctl
+```
+
+Linux 使用 `sha256sum -c -` 代替 `shasum -a 256 -c -`。安装插件时，
+下载对应的 `kubectl-ks` 归档，将解压后的 `kubectl-ks` 放入 `PATH`，
+然后通过 `kubectl ks` 调用。
+
 ## 从源码构建
 
-将 `ksctl` 构建到 `bin/ksctl`：
+将 `ksctl` 和 `kubectl-ks` 构建到 `bin/`：
 
 ```bash
 make build
@@ -34,7 +56,8 @@ make build
 
 登录 KubeSphere。
 
-当前版本输入密码时内容可见，但密码只用于本次登录请求，不会落盘。
+当标准输入为终端时，ksctl 会以不回显方式读取密码。密码只用于本次登录请求，
+不会持久化。
 
 ```text
 $ ./bin/ksctl auth login
@@ -92,7 +115,6 @@ Kubernetes 资源。
 | --- | --- |
 | `--context NAME` | 使用指定的 ksctl Context。 |
 | `--cluster NAME` | 选择 KubeSphere 集群。 |
-| `--workspace NAME` | 选择 KubeSphere Workspace。 |
 | `-n, --namespace NAME` | 选择 Kubernetes Namespace 或 KubeSphere Project。 |
 | `--endpoint URL` | 覆盖 KubeSphere API 地址。 |
 | `--token TOKEN` | 覆盖 Bearer Token。 |
@@ -156,6 +178,10 @@ ksctl get workspaces \
 
 ksctl 使用独立于 kubeconfig 的 `~/.ksctl/config.yaml`。设置 `KSCTL_CONFIG`
 可以使用其他配置文件路径。
+
+`ksctl config view` 默认遮蔽已保存的密码、Bearer Token 和 TLS 私钥数据。
+仅在确实需要原始值时使用 `ksctl config view --raw`，并且不要把原始输出写入
+日志或问题报告。
 
 ```yaml
 apiVersion: ksctl.kubesphere.io/v1alpha1
@@ -249,14 +275,17 @@ ksctl auth logout local
 
 ## 开发
 
-Makefile 提供三个开发目标：
+Makefile 提供以下开发目标：
 
 ```bash
 make build
 make test
+make verify
 make clean
 ```
 
-- `build` 创建 `bin/ksctl`。
+- `build` 创建 `bin/ksctl` 和 `bin/kubectl-ks`。
 - `test` 运行全部 Go 测试。
-- `clean` 删除 `bin/ksctl`。
+- `verify` 是本地发布门禁：检查格式和模块元数据，然后运行 vet、普通测试、
+  race 测试及两个二进制构建。
+- `clean` 删除两个二进制文件。

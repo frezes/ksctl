@@ -13,15 +13,26 @@ type promptResult struct {
 }
 
 type fakePrompter struct {
-	available bool
-	results   []promptResult
-	prompts   []string
+	available       bool
+	results         []promptResult
+	prompts         []string
+	passwordPrompts []string
 }
 
 func (p *fakePrompter) Available() bool { return p.available }
 
 func (p *fakePrompter) ReadLine(prompt string) (string, error) {
 	p.prompts = append(p.prompts, prompt)
+	if len(p.results) == 0 {
+		return "", errors.New("unexpected prompt")
+	}
+	result := p.results[0]
+	p.results = p.results[1:]
+	return result.value, result.err
+}
+
+func (p *fakePrompter) ReadPassword(prompt string) (string, error) {
+	p.passwordPrompts = append(p.passwordPrompts, prompt)
 	if len(p.results) == 0 {
 		return "", errors.New("unexpected prompt")
 	}
@@ -56,12 +67,14 @@ func TestResolveFullyInteractiveLogin(t *testing.T) {
 	wantPrompts := []string{
 		"endpoint: ",
 		"username: ",
-		"password: ",
 		"fleet [prod.example.com]: ",
 		"context [prod.example.com-admin]: ",
 	}
 	if !reflect.DeepEqual(prompter.prompts, wantPrompts) {
 		t.Fatalf("prompts = %#v, want %#v", prompter.prompts, wantPrompts)
+	}
+	if !reflect.DeepEqual(prompter.passwordPrompts, []string{"password: "}) {
+		t.Fatalf("password prompts = %#v", prompter.passwordPrompts)
 	}
 }
 
@@ -82,9 +95,12 @@ func TestResolveUsesExplicitValuesAndCustomNames(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)
 	}
-	wantPrompts := []string{"password: ", "fleet [ks.example.com]: ", "context [local-admin]: "}
+	wantPrompts := []string{"fleet [ks.example.com]: ", "context [local-admin]: "}
 	if !reflect.DeepEqual(prompter.prompts, wantPrompts) {
 		t.Fatalf("prompts = %#v, want %#v", prompter.prompts, wantPrompts)
+	}
+	if !reflect.DeepEqual(prompter.passwordPrompts, []string{"password: "}) {
+		t.Fatalf("password prompts = %#v", prompter.passwordPrompts)
 	}
 }
 
@@ -136,12 +152,14 @@ func TestResolveMissingUsernameAndPasswordContinuesGuidedFlow(t *testing.T) {
 	}
 	wantPrompts := []string{
 		"username: ",
-		"password: ",
 		"fleet [ks.example.com]: ",
 		"context [ks.example.com-admin]: ",
 	}
 	if !reflect.DeepEqual(prompter.prompts, wantPrompts) {
 		t.Fatalf("prompts = %#v, want %#v", prompter.prompts, wantPrompts)
+	}
+	if !reflect.DeepEqual(prompter.passwordPrompts, []string{"password: "}) {
+		t.Fatalf("password prompts = %#v", prompter.passwordPrompts)
 	}
 }
 
@@ -195,5 +213,22 @@ func TestResolveReportsPromptReadField(t *testing.T) {
 	_, err := Resolve(ResolveOptions{Prompter: prompter})
 	if err == nil || !strings.Contains(err.Error(), "error: read endpoint: read failed") {
 		t.Fatalf("Resolve() error = %v", err)
+	}
+}
+
+func TestResolveReportsPasswordReadField(t *testing.T) {
+	prompter := &fakePrompter{
+		available: true,
+		results:   []promptResult{{err: errors.New("read failed")}},
+	}
+	_, err := Resolve(ResolveOptions{
+		Input:    Input{Endpoint: "https://ks.example.com", Username: "admin"},
+		Prompter: prompter,
+	})
+	if err == nil || err.Error() != "error: read password: read failed" {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if !reflect.DeepEqual(prompter.passwordPrompts, []string{"password: "}) {
+		t.Fatalf("password prompts = %#v", prompter.passwordPrompts)
 	}
 }
