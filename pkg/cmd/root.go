@@ -7,8 +7,10 @@ import (
 	"sync"
 
 	"github.com/kubesphere/ksctl/pkg/auth"
+	clientoptions "github.com/kubesphere/ksctl/pkg/client"
 	clientkubernetes "github.com/kubesphere/ksctl/pkg/client/kubernetes"
 	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
+	clientkubesphereconnection "github.com/kubesphere/ksctl/pkg/client/kubesphere/connection"
 	plugincmd "github.com/kubesphere/ksctl/pkg/cmd/plugin"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
@@ -70,7 +72,7 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 		cmd.SetIn(streams.In)
 	}
 
-	connection := &clientkubernetes.Options{UserAgent: "ksctl/" + info.Version}
+	connection := &clientoptions.Options{UserAgent: "ksctl/" + info.Version}
 	cmd.PersistentFlags().StringVar(&connection.Endpoint, "endpoint", "", "KubeSphere API endpoint")
 	cmd.PersistentFlags().StringVar(&connection.Token, "token", "", "KubeSphere bearer token")
 	cmd.PersistentFlags().StringVar(&connection.Context, "context", "", "ksctl context name")
@@ -81,15 +83,18 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 
 	oauth := auth.NewOAuth(clientkubesphere.NewRESTClientFactory(nil))
 	provider := auth.NewProvider(auth.ProviderOptions{Requester: oauth})
-	getter := clientkubernetes.NewRESTClientGetter(connection, clientkubernetes.Dependencies{
+	kubernetesGetter := clientkubernetes.NewRESTClientGetter(connection, clientkubernetes.Dependencies{
+		TokenProvider: provider,
+	})
+	kubeSphereGetter := clientkubesphereconnection.NewRESTClientGetter(connection, clientkubesphereconnection.Dependencies{
 		TokenProvider: provider,
 	})
 
-	cmd.AddCommand(newVersionCommand(info, getter))
-	cmd.AddCommand(newConfigCommand(streams))
+	cmd.AddCommand(newVersionCommand(info, kubernetesGetter))
+	cmd.AddCommand(newConfigCommand(kubeSphereGetter))
 	cmd.AddCommand(newAuthCommand(connection.UserAgent, oauth))
 
-	factory := cmdutil.NewFactory(getter)
+	factory := cmdutil.NewFactory(kubernetesGetter)
 	kubeStreams := genericiooptions.IOStreams{
 		In:     streams.In,
 		Out:    streams.Out,

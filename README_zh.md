@@ -104,6 +104,7 @@ ksctl [command] [TYPE] [NAME] [flags]
 | `ksctl config view` | 显示合并后的 ksctl 配置。 |
 | `ksctl config current-context` | 显示当前 Context 名称。 |
 | `ksctl config use-context NAME` | 选择已有 Context。 |
+| `ksctl config generate kubeconfig` | 将当前登录用户的 kubeconfig 写入标准输出。 |
 | `ksctl plugin list` | 列出并诊断 `PATH` 中的 `ksctl-*` 可执行插件。 |
 | `ksctl version` | 显示 ksctl、KubeSphere 和 Kubernetes 版本。 |
 
@@ -250,13 +251,21 @@ contexts:
 块不会输出；`defaultCluster` 始终输出，默认值为空字符串。根级 `users` 不会被
 读取或迁移。
 
-使用配置命令查看或切换 Context：
+使用配置命令查看或切换 Context，并获取当前登录用户的 kubeconfig：
 
 ```bash
 ksctl config view
 ksctl config current-context
 ksctl config use-context prod-admin
+umask 077
+ksctl config generate kubeconfig > member.kubeconfig
+ksctl config generate kubeconfig --cluster member-1 > member-1.kubeconfig
 ```
+
+生成 kubeconfig 时必须选择一个已登录的 Context。显式 `--cluster` 会覆盖该
+Context 的 `defaultCluster`，未指定时使用默认集群。命令将 kubeconfig 原样写入
+标准输出，不会合并到 `~/.kube/config`。kubeconfig 包含凭证；重定向到文件前应
+设置 `077` 等严格的 umask。
 
 ## 认证
 

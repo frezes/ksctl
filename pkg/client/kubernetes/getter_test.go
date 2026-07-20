@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -204,6 +205,59 @@ func TestRESTClientGetterRejectsInvalidClusterPathSegment(t *testing.T) {
 	}
 }
 
+func TestRESTClientGetterRejectsInvalidClusterBeforeResolvingToken(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		options   Options
+		configure func(*config.Config)
+	}{
+		{
+			name: "explicit cluster",
+			options: Options{
+				Endpoint: "https://ks.example.com",
+				Cluster:  "team/member",
+			},
+		},
+		{
+			name: "context default cluster",
+			configure: func(cfg *config.Config) {
+				cfg.CurrentContext = "local"
+				cfg.Fleets["local"] = config.Fleet{
+					Host:  "https://ks.example.com",
+					Users: map[string]config.User{"admin": {}},
+				}
+				cfg.Contexts["local"] = config.Context{
+					Fleet:          "local",
+					User:           "admin",
+					DefaultCluster: "team/member",
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			cfg := config.New()
+			if test.configure != nil {
+				test.configure(cfg)
+			}
+			if err := config.Save(path, cfg); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			test.options.ConfigPath = path
+
+			provider := &recordingTokenProvider{}
+			getter := NewRESTClientGetter(&test.options, Dependencies{TokenProvider: provider})
+			_, err := getter.ToRESTConfig()
+			if err == nil || !strings.Contains(err.Error(), "invalid cluster") {
+				t.Fatalf("ToRESTConfig() error = %v, want invalid cluster", err)
+			}
+			if provider.calls != 0 {
+				t.Fatalf("Token() calls = %d, want 0", provider.calls)
+			}
+		})
+	}
+}
+
 func TestRESTClientGetterCachesDiscoveryAndPreservesAPIPaths(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -367,6 +421,15 @@ func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 type recordingTransport struct {
 	mu    sync.Mutex
 	paths []string
+}
+
+type recordingTokenProvider struct {
+	calls int
+}
+
+func (p *recordingTokenProvider) Token(context.Context, auth.Resolved, auth.TokenOptions) (string, error) {
+	p.calls++
+	return "secret", nil
 }
 
 func (t *recordingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
