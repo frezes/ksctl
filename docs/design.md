@@ -234,6 +234,20 @@ User, and Context metadata plus the complete OAuth response. It never stores
 the supplied Password. `auth logout` deletes the Fleet/User cache only and
 preserves configuration.
 
+`auth whoami` is server-backed. It resolves the selected Context's User name,
+builds an authenticated Fleet-level KubeSphere REST client, and reads:
+
+```text
+/kapis/iam.kubesphere.io/v1beta1/users/<username>
+```
+
+The command prints the returned `metadata.name` and
+`metadata.annotations["iam.kubesphere.io/globalrole"]`. The request verifies
+that the resolved credential can access the selected User resource, but the
+endpoint is not an OAuth token-subject introspection API. Member Cluster
+routing does not apply. In contrast, `auth logout` remains local-only and does
+not revoke the server-side token.
+
 ## Cross-cluster routing
 
 The selected Cluster changes request routing without changing resource command

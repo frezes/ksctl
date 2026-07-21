@@ -1,27 +1,105 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/kubesphere/ksctl/pkg/auth"
 	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
+	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	authcmd "github.com/kubesphere/ksctl/pkg/cmd/auth"
 	"github.com/kubesphere/ksctl/pkg/config"
 	"github.com/spf13/cobra"
+	kubesphererest "kubesphere.io/client-go/rest"
 )
+
+const globalRoleAnnotation = "iam.kubesphere.io/globalrole"
 
 type loginPrompterFactory func(io.Reader, io.Writer) authcmd.Prompter
 
-func newAuthCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
+type whoamiRESTClientGetter interface {
+	ToRESTConfig() (*kubesphererest.Config, error)
+	KubeSphereUsername() (string, error)
+}
+
+type whoamiUser struct {
+	Metadata struct {
+		Name        string            `json:"name"`
+		Annotations map[string]string `json:"annotations"`
+	} `json:"metadata"`
+}
+
+func newAuthCommand(userAgent string, oauth *auth.OAuth, getter whoamiRESTClientGetter) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Manage KubeSphere authentication",
 	}
 	cmd.AddCommand(newLoginCommand(userAgent, oauth))
 	cmd.AddCommand(newLogoutCommand())
+	cmd.AddCommand(newWhoAmICommand(getter))
 	return cmd
+}
+
+func newWhoAmICommand(getter whoamiRESTClientGetter) *cobra.Command {
+	return &cobra.Command{
+		Use:   "whoami",
+		Short: "Display the current KubeSphere user and global role",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			user, err := loadWhoAmI(cmd.Context(), getter)
+			if err != nil {
+				return err
+			}
+			role := strings.TrimSpace(user.Metadata.Annotations[globalRoleAnnotation])
+			if role == "" {
+				role = "<none>"
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Username: %s\nGlobal Role: %s\n", user.Metadata.Name, role); err != nil {
+				return fmt.Errorf("write whoami output: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
+func loadWhoAmI(ctx context.Context, getter whoamiRESTClientGetter) (whoamiUser, error) {
+	if getter == nil {
+		return whoamiUser{}, fmt.Errorf("KubeSphere REST client getter is required")
+	}
+	username, err := getter.KubeSphereUsername()
+	if err != nil {
+		return whoamiUser{}, fmt.Errorf("resolve KubeSphere username: %w", err)
+	}
+	if messages := kubesphererest.IsValidPathSegmentName(username); len(messages) != 0 {
+		return whoamiUser{}, fmt.Errorf("invalid username %q: %v", username, messages)
+	}
+	restConfig, err := getter.ToRESTConfig()
+	if err != nil {
+		return whoamiUser{}, fmt.Errorf("resolve KubeSphere connection: %w", err)
+	}
+	client, err := clientkubesphere.NewRESTClientFactory(nil).ForConfig(restConfig)
+	if err != nil {
+		return whoamiUser{}, fmt.Errorf("build KubeSphere client: %w", err)
+	}
+	raw, err := client.Get().
+		AbsPath("/kapis/iam.kubesphere.io/v1beta1/users", username).
+		Do(ctx).
+		Raw()
+	if err != nil {
+		return whoamiUser{}, fmt.Errorf("get KubeSphere user %q: %w", username, err)
+	}
+	var user whoamiUser
+	if err := json.Unmarshal(raw, &user); err != nil {
+		return whoamiUser{}, fmt.Errorf("decode KubeSphere user %q: %w", username, err)
+	}
+	if strings.TrimSpace(user.Metadata.Name) == "" {
+		return whoamiUser{}, fmt.Errorf("KubeSphere user response is missing metadata.name")
+	}
+	return user, nil
 }
 
 func newLoginCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
