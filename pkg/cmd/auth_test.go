@@ -302,10 +302,23 @@ func TestLogoutDeletesTokenCacheAndPreservesConfiguredCredentials(t *testing.T) 
 	t.Setenv("HOME", home)
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("KSCTL_CONFIG", configPath)
+	logoutRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logoutRequests++
+		if r.Method != http.MethodGet || r.URL.Path != "/oauth/logout" {
+			t.Errorf("request = %s %s, want GET /oauth/logout", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer cached-token" {
+			t.Errorf("Authorization = %q, want cached bearer token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
 
 	cfg := config.New()
 	cfg.CurrentContext = "local"
-	cfg.Fleets["local"] = config.Fleet{Host: "https://ks.example.com", Users: map[string]config.User{"local": {
+	cfg.Fleets["local"] = config.Fleet{Host: server.URL, Users: map[string]config.User{"local": {
 		Username: "admin", BearerToken: "manual-token",
 		BearerTokenFile: "/tmp/manual-token", Password: "manual-password",
 	}}}
@@ -339,6 +352,135 @@ func TestLogoutDeletesTokenCacheAndPreservesConfiguredCredentials(t *testing.T) 
 	}
 	if after := readFile(t, configPath); after != before {
 		t.Fatalf("config changed during logout:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if logoutRequests != 1 {
+		t.Fatalf("logout requests = %d, want 1", logoutRequests)
+	}
+}
+
+func prepareLogoutTest(t *testing.T, host string) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	cfg := config.New()
+	cfg.CurrentContext = "local"
+	cfg.Fleets["local"] = config.Fleet{Host: host, Users: map[string]config.User{"admin": {Username: "admin"}}}
+	cfg.Contexts["local"] = config.Context{Fleet: "local", User: "admin"}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	return filepath.Join(home, ".ksctl", "cache", "tokens")
+}
+
+func TestLogoutIgnoresRemoteFailureAndDeletesCache(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		http.Error(w, "remote failure", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	cacheDir := prepareLogoutTest(t, server.URL)
+	if err := tokencache.Save(cacheDir, "local", "admin", tokencache.NewEntry(tokencache.Response{AccessToken: "cached-token", ExpiresIn: 7200}, time.Now())); err != nil {
+		t.Fatalf("Save token error = %v", err)
+	}
+
+	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"auth", "logout"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("logout requests = %d, want 1", requests)
+	}
+	if _, err := tokencache.Load(cacheDir, "local", "admin"); !os.IsNotExist(err) {
+		t.Fatalf("Load token cache error = %v, want not exist", err)
+	}
+}
+
+func TestLogoutIgnoresTransportFailureAndDeletesCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	host := server.URL
+	server.Close()
+	cacheDir := prepareLogoutTest(t, host)
+	if err := tokencache.Save(cacheDir, "local", "admin", tokencache.NewEntry(tokencache.Response{AccessToken: "cached-token", ExpiresIn: 7200}, time.Now())); err != nil {
+		t.Fatalf("Save token error = %v", err)
+	}
+
+	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"auth", "logout"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if _, err := tokencache.Load(cacheDir, "local", "admin"); !os.IsNotExist(err) {
+		t.Fatalf("Load token cache error = %v, want not exist", err)
+	}
+}
+
+func TestLogoutWithoutCacheSkipsRemoteRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	prepareLogoutTest(t, server.URL)
+	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"auth", "logout"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("logout requests = %d, want 0", requests)
+	}
+}
+
+func TestLogoutDeletesMalformedCacheWithoutRemoteRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	cacheDir := prepareLogoutTest(t, server.URL)
+	path := tokencache.Path(cacheDir, "local", "admin")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte("not-json"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"auth", "logout"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("logout requests = %d, want 0", requests)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("Stat token cache error = %v, want not exist", err)
+	}
+}
+
+func TestLogoutDeletesUnreadableCacheWithoutRemoteRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	cacheDir := prepareLogoutTest(t, server.URL)
+	path := tokencache.Path(cacheDir, "local", "admin")
+	if err := tokencache.Save(cacheDir, "local", "admin", tokencache.NewEntry(tokencache.Response{AccessToken: "cached-token", ExpiresIn: 7200}, time.Now())); err != nil {
+		t.Fatalf("Save token error = %v", err)
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd.SetArgs([]string{"auth", "logout"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("logout requests = %d, want 0", requests)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("Stat token cache error = %v, want not exist", err)
 	}
 }
 

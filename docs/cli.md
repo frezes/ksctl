@@ -130,10 +130,12 @@ ksctl auth logout
 ksctl auth logout prod-admin
 ```
 
-Logout removes only the token cache for the selected Fleet and User. It does
-not delete Contexts or manually configured credentials. Contexts that select
-the same Fleet and User share that cache and logout state. Logout does not call
-a KubeSphere logout or token-revocation API.
+Logout makes a best-effort request to the Fleet's `/oauth/logout` endpoint
+using the cached Access Token, then removes the token cache for the selected
+Fleet and User regardless of the remote result. It does not delete Contexts or
+manually configured credentials. Contexts that select the same Fleet and User
+share that cache and logout state. A configured `bearerToken` or
+`bearerTokenFile` can still authenticate later commands.
 
 ## Scope and connection selection
 

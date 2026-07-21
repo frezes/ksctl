@@ -231,7 +231,8 @@ reason to ignore the file.
 `auth login` is the explicit cache-creation path. It resolves interactive or
 fully supplied input, performs the password grant, then saves non-secret Fleet,
 User, and Context metadata plus the complete OAuth response. It never stores
-the supplied Password. `auth logout` deletes the Fleet/User cache only and
+the supplied Password. `auth logout` asks KubeSphere to revoke the cached
+Access Token, deletes the Fleet/User cache regardless of the remote result, and
 preserves configuration.
 
 `auth whoami` is server-backed. It resolves the selected Context's User name,
@@ -244,9 +245,11 @@ builds an authenticated Fleet-level KubeSphere REST client, and reads:
 The command prints the returned `metadata.name` and
 `metadata.annotations["iam.kubesphere.io/globalrole"]`. The request verifies
 that the resolved credential can access the selected User resource, but the
-endpoint is not an OAuth token-subject introspection API. Member Cluster
-routing does not apply. In contrast, `auth logout` remains local-only and does
-not revoke the server-side token.
+endpoint is not an OAuth token-subject introspection API. `auth logout` reads
+the cached Fleet/User Access Token and makes a best-effort, unscoped request to
+`<fleet-endpoint>/oauth/logout`. It ignores remote errors and always attempts
+to delete the local Fleet/User cache. It does not resolve or revoke configured
+static credentials, perform a refresh, or apply Member Cluster routing.
 
 ## Cross-cluster routing
 
