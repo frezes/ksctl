@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -373,6 +374,178 @@ func TestLogoutReturnsBrokenContextReferenceErrors(t *testing.T) {
 				t.Fatalf("Execute() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestAuthWhoAmIPrintsServerUserAndGlobalRole(t *testing.T) {
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		const wantPath = "/kapis/iam.kubesphere.io/v1beta1/users/admin"
+		if r.URL.Path != wantPath {
+			t.Errorf("path = %q, want %q", r.URL.Path, wantPath)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		if got := r.Header.Get("User-Agent"); got != "ksctl/test" {
+			t.Errorf("User-Agent = %q, want ksctl/test", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"kind":"User","apiVersion":"iam.kubesphere.io/v1beta1","metadata":{"name":"admin","annotations":{"iam.kubesphere.io/globalrole":"platform-admin"}}}`))
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	saveWhoAmITestConfig(t, configPath, server.URL, "admin", "secret")
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+	cmd.SetArgs([]string{"auth", "whoami", "--context", "local", "--cluster", "must-not-scope-request"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	const want = "Username: admin\nGlobal Role: platform-admin\n"
+	if got := out.String(); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestAuthWhoAmIUsesNoneForMissingGlobalRole(t *testing.T) {
+	for _, response := range []string{
+		`{"metadata":{"name":"alice"}}`,
+		`{"metadata":{"name":"alice","annotations":{"iam.kubesphere.io/globalrole":""}}}`,
+	} {
+		t.Run(response, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(response))
+			}))
+			defer server.Close()
+
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			t.Setenv("KSCTL_CONFIG", configPath)
+			saveWhoAmITestConfig(t, configPath, server.URL, "alice", "secret")
+			out := new(bytes.Buffer)
+			cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+			cmd.SetArgs([]string{"auth", "whoami"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			const want = "Username: alice\nGlobal Role: <none>\n"
+			if got := out.String(); got != want {
+				t.Fatalf("stdout = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestAuthWhoAmIReturnsServerAndResponseErrors(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		statusCode int
+		response   string
+		wantError  string
+	}{
+		{name: "unauthorized", statusCode: http.StatusUnauthorized, response: `{"message":"unauthorized"}`, wantError: "get KubeSphere user"},
+		{name: "not found", statusCode: http.StatusNotFound, response: `{"message":"not found"}`, wantError: "get KubeSphere user"},
+		{name: "malformed JSON", statusCode: http.StatusOK, response: `{`, wantError: "decode KubeSphere user"},
+		{name: "missing name", statusCode: http.StatusOK, response: `{"metadata":{"annotations":{"iam.kubesphere.io/globalrole":"platform-admin"}}}`, wantError: "KubeSphere user response is missing metadata.name"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(test.statusCode)
+				_, _ = w.Write([]byte(test.response))
+			}))
+			defer server.Close()
+
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			t.Setenv("KSCTL_CONFIG", configPath)
+			saveWhoAmITestConfig(t, configPath, server.URL, "admin", "secret")
+			cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+			cmd.SetArgs([]string{"auth", "whoami"})
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Execute() error = %v, want containing %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestAuthWhoAmIRejectsInvalidUsernameBeforeRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	saveWhoAmITestConfig(t, configPath, server.URL, "invalid/name", "secret")
+	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+	cmd.SetArgs([]string{"auth", "whoami"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `invalid username "invalid/name"`) {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0", requests)
+	}
+}
+
+func TestAuthWhoAmIRequiresContext(t *testing.T) {
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "missing-config.yaml"))
+	cmd := NewRootCommand(IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+	cmd.SetArgs([]string{"auth", "whoami"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "resolve KubeSphere username") || !strings.Contains(err.Error(), "current-context is not set") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func TestAuthWhoAmIReturnsOutputError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"metadata":{"name":"admin"}}`))
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	saveWhoAmITestConfig(t, configPath, server.URL, "admin", "secret")
+	cmd := NewRootCommand(IOStreams{Out: errorWriter{err: errors.New("write failed")}, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
+	cmd.SetArgs([]string{"auth", "whoami"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "write whoami output") || !strings.Contains(err.Error(), "write failed") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func saveWhoAmITestConfig(t *testing.T, path, endpoint, username, token string) {
+	t.Helper()
+	cfg := config.New()
+	cfg.CurrentContext = "local"
+	cfg.Fleets["local"] = config.Fleet{
+		Host: endpoint,
+		Users: map[string]config.User{
+			"account": {Username: username, BearerToken: token},
+		},
+	}
+	cfg.Contexts["local"] = config.Context{Fleet: "local", User: "account", DefaultCluster: "member"}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
 	}
 }
 
