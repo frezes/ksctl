@@ -55,6 +55,7 @@ ksctl config generate kubeconfig --help
 | `ksctl get TYPE [NAME]` | Display one or more resources. |
 | `ksctl describe TYPE [NAME_PREFIX]` | Display resource details and related information. |
 | `ksctl auth login [ENDPOINT]` | Authenticate with a username and password, then save a Context and token cache. |
+| `ksctl auth whoami` | Verify the selected credential and display the server-side User and global role. |
 | `ksctl auth logout [CONTEXT]` | Delete cached login credentials for the current or named Context. |
 | `ksctl config view` | Display the merged configuration, redacted by default. |
 | `ksctl config current-context` | Display the current Context name. |
@@ -104,6 +105,22 @@ ksctl auth login https://prod.example.com \
 Take care not to expose the password through shell history, logs, or process
 inspection when using `--password`.
 
+### Current identity
+
+Verify the selected Context's credentials and display its server-side identity:
+
+```text
+$ ksctl auth whoami
+Username: admin
+Global Role: platform-admin
+```
+
+`auth whoami` requires a current or explicitly selected Context because the
+Context supplies the User name. It authenticates to KubeSphere and reads
+`/kapis/iam.kubesphere.io/v1beta1/users/<username>`; it does not merely echo
+local configuration. A User without the `iam.kubesphere.io/globalrole`
+annotation is displayed as `Global Role: <none>`.
+
 ### Logout
 
 Log out the current Context or name another Context explicitly:
@@ -115,7 +132,8 @@ ksctl auth logout prod-admin
 
 Logout removes only the token cache for the selected Fleet and User. It does
 not delete Contexts or manually configured credentials. Contexts that select
-the same Fleet and User share that cache and logout state.
+the same Fleet and User share that cache and logout state. Logout does not call
+a KubeSphere logout or token-revocation API.
 
 ## Scope and connection selection
 

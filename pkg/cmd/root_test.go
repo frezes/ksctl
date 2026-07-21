@@ -263,17 +263,21 @@ func TestPluginHelpUsesEntrypointDisplayName(t *testing.T) {
 }
 
 func TestRootRegistersNestedAuthCommands(t *testing.T) {
-	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
-	auth := findSubcommand(root, "auth")
-	if auth == nil {
-		t.Fatal("auth command is not registered")
-	}
-	for _, name := range []string{"login", "logout"} {
-		if findSubcommand(auth, name) == nil {
-			t.Fatalf("auth %s command is not registered", name)
+	for _, root := range []*cobra.Command{
+		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+	} {
+		auth := findSubcommand(root, "auth")
+		if auth == nil {
+			t.Fatal("auth command is not registered")
 		}
-		if findSubcommand(root, name) != nil {
-			t.Fatalf("top-level %s command is registered", name)
+		for _, name := range []string{"login", "logout", "whoami"} {
+			if findSubcommand(auth, name) == nil {
+				t.Fatalf("auth %s command is not registered", name)
+			}
+			if findSubcommand(root, name) != nil {
+				t.Fatalf("top-level %s command is registered", name)
+			}
 		}
 	}
 }
