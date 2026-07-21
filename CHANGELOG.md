@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Revoke cached Access Tokens through the KubeSphere logout endpoint on a
+  best-effort basis before clearing local login state.
 - Add `auth whoami` to verify the selected KubeSphere credential and display
   the server-side User and global role.
 - Add kubectl-compatible `ksctl-*` executable plugins to both `ksctl` and
