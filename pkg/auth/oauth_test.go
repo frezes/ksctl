@@ -100,6 +100,81 @@ func TestRefreshUsesRefreshGrant(t *testing.T) {
 	}
 }
 
+func TestLogoutRevokesBearerTokenAtKubeSphereEndpoint(t *testing.T) {
+	defer klog.CaptureState().Restore()
+	var flags flag.FlagSet
+	klog.InitFlags(&flags)
+	if err := flags.Set("v", "8"); err != nil {
+		t.Fatalf("set klog verbosity: %v", err)
+	}
+	var logs bytes.Buffer
+	klog.SetOutput(&logs)
+	klog.LogToStderr(false)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/oauth/logout" {
+			t.Errorf("request = %s %s, want GET /oauth/logout", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer cached-access-token" {
+			t.Errorf("Authorization = %q, want cached bearer token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	factory := &recordingRESTClientFactory{delegate: clientkubesphere.NewRESTClientFactory(&http.Client{})}
+	err := NewOAuth(factory).Logout(context.Background(), LogoutOptions{
+		Endpoint:    server.URL,
+		AccessToken: "cached-access-token",
+		UserAgent:   "ksctl/test",
+		Timeout:     15 * time.Second,
+		TLSClientConfig: config.TLSClientConfig{
+			ServerName: "ks.example.com",
+			CAData:     "test-ca",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Logout() error = %v", err)
+	}
+	if factory.config.Host != server.URL || factory.config.UserAgent != "ksctl/test" || factory.config.Timeout != 15*time.Second {
+		t.Fatalf("REST config = %#v", factory.config)
+	}
+	if factory.config.ServerName != "ks.example.com" || string(factory.config.CAData) != "test-ca" {
+		t.Fatalf("REST TLS config = %#v", factory.config.TLSClientConfig)
+	}
+	if strings.Contains(logs.String(), "cached-access-token") {
+		t.Fatalf("logout logs expose access token: %s", logs.String())
+	}
+}
+
+func TestLogoutFailureDoesNotExposeAccessToken(t *testing.T) {
+	defer klog.CaptureState().Restore()
+	var flags flag.FlagSet
+	klog.InitFlags(&flags)
+	if err := flags.Set("v", "8"); err != nil {
+		t.Fatalf("set klog verbosity: %v", err)
+	}
+	var logs bytes.Buffer
+	klog.SetOutput(&logs)
+	klog.LogToStderr(false)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "cached-access-token", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	err := newTestOAuth().Logout(context.Background(), LogoutOptions{
+		Endpoint: server.URL, AccessToken: "cached-access-token",
+	})
+	if err == nil {
+		t.Fatal("Logout() error = nil, want logout error")
+	}
+	if strings.Contains(err.Error(), "cached-access-token") || strings.Contains(logs.String(), "cached-access-token") {
+		t.Fatalf("Logout() exposes access token; error=%v logs=%q", err, logs.String())
+	}
+}
+
 func TestTokenRequestFailureDoesNotExposeCredentials(t *testing.T) {
 	defer klog.CaptureState().Restore()
 	var flags flag.FlagSet

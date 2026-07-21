@@ -26,6 +26,15 @@ type TokenRequestOptions struct {
 	TLSClientConfig       config.TLSClientConfig
 }
 
+type LogoutOptions struct {
+	Endpoint              string
+	AccessToken           string
+	UserAgent             string
+	Timeout               time.Duration
+	InsecureSkipTLSVerify bool
+	TLSClientConfig       config.TLSClientConfig
+}
+
 type RESTClientFactory interface {
 	ForConfig(*kubesphererest.Config) (kubesphererest.Interface, error)
 }
@@ -57,6 +66,31 @@ func (o *OAuth) Refresh(ctx context.Context, options TokenRequestOptions) (token
 		"refresh_token": []string{options.RefreshToken},
 	}
 	return o.requestToken(ctx, options, form, "KubeSphere token refresh")
+}
+
+func (o *OAuth) Logout(ctx context.Context, options LogoutOptions) error {
+	if o == nil || o.factory == nil {
+		return fmt.Errorf("KubeSphere REST client factory is required")
+	}
+	config := &kubesphererest.Config{
+		Host:            options.Endpoint,
+		UserAgent:       options.UserAgent,
+		Timeout:         options.Timeout,
+		TLSClientConfig: toKubeSphereTLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
+	}
+	config.Wrap(redactOAuthErrorResponses)
+	client, err := o.factory.ForConfig(config)
+	if err != nil {
+		return fmt.Errorf("create KubeSphere logout client: %w", err)
+	}
+	if err := client.Get().
+		AbsPath("/oauth/logout").
+		SetHeader("Authorization", "Bearer "+options.AccessToken).
+		Do(ctx).
+		Error(); err != nil {
+		return fmt.Errorf("KubeSphere logout failed")
+	}
+	return nil
 }
 
 func (o *OAuth) requestToken(ctx context.Context, options TokenRequestOptions, form url.Values, operation string) (tokencache.Response, error) {
