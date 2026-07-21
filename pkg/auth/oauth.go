@@ -76,9 +76,10 @@ func (o *OAuth) Logout(ctx context.Context, options LogoutOptions) error {
 		Host:            options.Endpoint,
 		UserAgent:       options.UserAgent,
 		Timeout:         options.Timeout,
+		WarningHandler:  kubesphererest.NoWarnings{},
 		TLSClientConfig: toKubeSphereTLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
 	}
-	config.Wrap(redactOAuthErrorResponses)
+	config.Wrap(redactLogoutResponses)
 	client, err := o.factory.ForConfig(config)
 	if err != nil {
 		return fmt.Errorf("create KubeSphere logout client: %w", err)
@@ -86,11 +87,29 @@ func (o *OAuth) Logout(ctx context.Context, options LogoutOptions) error {
 	if err := client.Get().
 		AbsPath("/oauth/logout").
 		SetHeader("Authorization", "Bearer "+options.AccessToken).
+		MaxRetries(0).
 		Do(ctx).
 		Error(); err != nil {
 		return fmt.Errorf("KubeSphere logout failed")
 	}
 	return nil
+}
+
+func redactLogoutResponses(delegate http.RoundTripper) http.RoundTripper {
+	return roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		response, err := delegate.RoundTrip(request)
+		if err != nil || response == nil {
+			return response, err
+		}
+		if response.Body != nil {
+			_ = response.Body.Close()
+		}
+		response.Body = http.NoBody
+		response.ContentLength = 0
+		response.TransferEncoding = nil
+		response.Header.Del("Content-Length")
+		return response, nil
+	})
 }
 
 func (o *OAuth) requestToken(ctx context.Context, options TokenRequestOptions, form url.Values, operation string) (tokencache.Response, error) {

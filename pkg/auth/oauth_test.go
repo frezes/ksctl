@@ -119,7 +119,8 @@ func TestLogoutRevokesBearerTokenAtKubeSphereEndpoint(t *testing.T) {
 			t.Errorf("Authorization = %q, want cached bearer token", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{}`)
+		w.Header().Set("Warning", `299 ks "cached-access-token"`)
+		_, _ = fmt.Fprint(w, `{"message":"cached-access-token"}`)
 	}))
 	defer server.Close()
 
@@ -145,6 +146,26 @@ func TestLogoutRevokesBearerTokenAtKubeSphereEndpoint(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "cached-access-token") {
 		t.Fatalf("logout logs expose access token: %s", logs.String())
+	}
+}
+
+func TestLogoutDoesNotRetry(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Retry-After", "0")
+		http.Error(w, "retry later", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	err := newTestOAuth().Logout(context.Background(), LogoutOptions{
+		Endpoint: server.URL, AccessToken: "cached-access-token",
+	})
+	if err == nil {
+		t.Fatal("Logout() error = nil, want logout error")
+	}
+	if requests != 1 {
+		t.Fatalf("logout requests = %d, want 1", requests)
 	}
 }
 
