@@ -39,7 +39,7 @@ func newAuthCommand(userAgent string, oauth *auth.OAuth, getter whoamiRESTClient
 		Short: "Manage KubeSphere authentication",
 	}
 	cmd.AddCommand(newLoginCommand(userAgent, oauth))
-	cmd.AddCommand(newLogoutCommand())
+	cmd.AddCommand(newLogoutCommand(userAgent, oauth))
 	cmd.AddCommand(newWhoAmICommand(getter))
 	return cmd
 }
@@ -179,7 +179,7 @@ func newLoginCommandWithPrompter(userAgent string, oauth *auth.OAuth, newPrompte
 	return cmd
 }
 
-func newLogoutCommand() *cobra.Command {
+func newLogoutCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logout [CONTEXT]",
 		Short: "Log out from KubeSphere",
@@ -206,6 +206,16 @@ func newLogoutCommand() *cobra.Command {
 			}
 			if _, ok := fleet.Users[ctx.User]; !ok {
 				return fmt.Errorf("error: no user exists with the name: %s in fleet: %s", ctx.User, ctx.Fleet)
+			}
+			entry, loadErr := tokencache.Load(tokencache.DefaultDir(), ctx.Fleet, ctx.User)
+			if loadErr == nil && entry.AccessToken != "" && oauth != nil {
+				_ = oauth.Logout(cmd.Context(), auth.LogoutOptions{
+					Endpoint:        fleet.Host,
+					AccessToken:     entry.AccessToken,
+					UserAgent:       userAgent,
+					Timeout:         30 * time.Second,
+					TLSClientConfig: fleet.TLSClientConfig,
+				})
 			}
 			if err := tokencache.Delete(tokencache.DefaultDir(), ctx.Fleet, ctx.User); err != nil {
 				return err
