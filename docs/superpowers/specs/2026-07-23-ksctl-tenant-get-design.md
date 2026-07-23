@@ -10,11 +10,12 @@ The commands call KubeSphere Enterprise 4.2.1's native
 `/api` and `/apis` endpoints used by the existing kubectl-derived `get`
 command.
 
-The initial resource surface lists Workspaces, Namespaces, and Clusters, and
-can retrieve one named Workspace. Namespace and Cluster lists optionally use a
-Workspace scope. Workspace and Namespace requests follow the effective
-KubeSphere Cluster selected by `--cluster` or the current Context's
-`defaultCluster`; Cluster-list requests always remain at Fleet scope.
+The initial resource surface lists WorkspaceTemplates, Namespaces, and
+Clusters, presenting WorkspaceTemplates to users as Workspaces, and can
+retrieve one named WorkspaceTemplate. Namespace and Cluster lists optionally
+use a Workspace scope. Namespace requests follow the effective KubeSphere
+Cluster selected by `--cluster` or the current Context's `defaultCluster`;
+WorkspaceTemplate and Cluster requests always remain at Fleet scope.
 
 ## Goals
 
@@ -47,8 +48,8 @@ The command syntax is:
 
 ```text
 ksctl tenant get workspace [NAME] [-o table|json|yaml]
-ksctl tenant get namespace [-w WORKSPACE] [-o table|json|yaml]
-ksctl tenant get cluster [-w WORKSPACE] [-o table|json|yaml]
+ksctl tenant get namespace [--workspace WORKSPACE] [-o table|json|yaml]
+ksctl tenant get cluster [--workspace WORKSPACE] [-o table|json|yaml]
 ```
 
 The same commands are available under `kubectl ks tenant get`.
@@ -59,10 +60,9 @@ Accepted resource names are:
 - `namespace`, `namespaces`, and `ns`; and
 - `cluster` and `clusters`.
 
-`ws` is not a resource alias. `-w` is the short form of the
-`--workspace` scope flag and is defined only for Namespace and Cluster
-commands. Workspace accepts zero or one positional name. Namespace and Cluster
-accept no positional names.
+`ws` is not a resource alias. `--workspace` is defined only for Namespace and
+Cluster commands and has no short form. Workspace accepts zero or one
+positional name. Namespace and Cluster accept no positional names.
 
 The `-o`/`--output` value defaults to `table`. The only accepted values are
 `table`, `json`, and `yaml`.
@@ -80,18 +80,18 @@ an explicit root `--cluster` overrides the selected Context's
 `defaultCluster`. If neither supplies a Cluster, the effective Cluster is
 empty.
 
-Workspace and Namespace requests apply the effective Cluster as a KubeSphere
-proxy prefix. Cluster resource requests deliberately ignore the effective
-Cluster and remain Fleet-scoped.
+Namespace requests apply the effective Cluster as a KubeSphere proxy prefix.
+Workspace requests use the Fleet-scoped `workspacetemplates` resource and
+Cluster resource requests deliberately ignore the effective Cluster.
 
 | Command | Empty effective Cluster | Non-empty effective Cluster |
 | --- | --- | --- |
-| `tenant get workspace` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces` | `/clusters/{cluster}/kapis/tenant.kubesphere.io/v1beta1/workspaces` |
-| `tenant get workspace NAME` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces/{name}` | `/clusters/{cluster}/kapis/tenant.kubesphere.io/v1beta1/workspaces/{name}` |
+| `tenant get workspace` | `/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates` | `/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates` |
+| `tenant get workspace NAME` | `/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates/{name}` | `/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates/{name}` |
 | `tenant get ns` | `/kapis/tenant.kubesphere.io/v1beta1/namespaces` | `/clusters/{cluster}/kapis/tenant.kubesphere.io/v1beta1/namespaces` |
-| `tenant get ns -w WORKSPACE` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/namespaces` | `/clusters/{cluster}/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/namespaces` |
+| `tenant get ns --workspace WORKSPACE` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/namespaces` | `/clusters/{cluster}/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/namespaces` |
 | `tenant get cluster` | `/kapis/tenant.kubesphere.io/v1beta1/clusters` | `/kapis/tenant.kubesphere.io/v1beta1/clusters` |
-| `tenant get cluster -w WORKSPACE` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/clusters` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/clusters` |
+| `tenant get cluster --workspace WORKSPACE` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/clusters` | `/kapis/tenant.kubesphere.io/v1beta1/workspaces/{workspace}/clusters` |
 
 All requests use HTTP GET and the bearer token resolved by the existing
 KubeSphere connection stack.
@@ -99,10 +99,11 @@ KubeSphere connection stack.
 ## Response and Output
 
 KSE does not use one list envelope consistently across these endpoints.
-Workspace lists may use a pageable response with `items` and `total_count`,
-while Namespace and Cluster lists use `items` and `totalItems`. Table rendering
-therefore reads only the `items` array and does not depend on either count
-field. A single Workspace response is treated as one table row.
+WorkspaceTemplate lists use a pageable response with `items` and
+`total_count`, while Namespace and Cluster lists use `items` and `totalItems`.
+Table rendering therefore reads only the `items` array and does not depend on
+either count field. A single WorkspaceTemplate response is treated as one
+table row.
 
 JSON output parses the response to ensure it is valid JSON, then writes it with
 stable indentation. YAML output converts the same complete JSON response to
@@ -122,11 +123,9 @@ kubectl column layout for the corresponding resources:
 Workspace values are read from `metadata.name`,
 `spec.placement.clusters[*].name`, `spec.template.spec.manager`, and
 `metadata.creationTimestamp`. Multiple explicit Cluster names are joined with
-commas in their response order. For a Cluster-scoped Workspace response,
-`spec.manager` supplies the Administrator and the effective Cluster supplies
-the Clusters value when placement is absent. AGE uses the kubectl-style compact
-duration since `metadata.creationTimestamp`, such as `8d`, and is `<unknown>`
-when the timestamp is absent or invalid.
+commas in their response order. AGE uses the kubectl-style compact duration
+since `metadata.creationTimestamp`, such as `8d`, and is `<unknown>` when the
+timestamp is absent or invalid.
 
 Namespace Status is `status.phase`. AGE is the kubectl-style compact duration
 since `metadata.creationTimestamp`, such as `8d`, and is `<unknown>` when the
@@ -149,10 +148,10 @@ v1beta1 base path, Cluster-prefix application, Workspace-scope application,
 GET requests, and response decoding needed to identify list items.
 
 The package receives an existing unversioned KubeSphere REST client or REST
-configuration. Its request methods distinguish between resources that follow
-the effective Cluster and the Cluster resource that must ignore it. It returns
-the complete raw response together with the decoded objects required for table
-printing.
+configuration. Its request methods distinguish the Namespace resource, which
+follows the effective Cluster, from WorkspaceTemplate and Cluster resources,
+which ignore it. It returns the complete raw response together with the
+decoded objects required for table printing.
 
 ### Tenant Commands
 
@@ -189,7 +188,7 @@ The command returns a non-zero result for:
   responses from KubeSphere;
 - malformed JSON;
 - a list response without an `items` array;
-- a non-object item or single-Workspace response; and
+- a non-object item or single-WorkspaceTemplate response; and
 - output write failures.
 
 Errors add the resource and relevant Cluster or Workspace scope without
@@ -202,22 +201,23 @@ Implementation follows test-driven development. Focused tests cover:
 
 - registration under both `ksctl` and `kubectl ks`;
 - all accepted resource names and rejection of the `ws` resource alias;
-- Workspace list and named-Workspace paths;
-- Namespace list paths with and without `-w`;
-- Cluster list paths with and without `-w`;
-- explicit `--cluster` and Context `defaultCluster` prefixes for Workspace and
-  Namespace;
-- explicit and default Clusters being ignored by both Cluster-list paths;
+- Fleet-scoped WorkspaceTemplate list and named-Workspace paths;
+- Namespace list paths with and without `--workspace`;
+- Cluster list paths with and without `--workspace`;
+- rejection of `-w` for Namespace and Cluster;
+- explicit `--cluster` and Context `defaultCluster` prefixes for Namespace;
+- explicit and default Clusters being ignored by WorkspaceTemplate and both
+  Cluster-list paths;
 - authorization headers, user agent, and request timeout reuse;
 - default Workspace, Namespace, and Cluster kubectl-style columns and values;
-- comma-joined Workspace placement Clusters, the Cluster-scoped Workspace
-  fallback, Administrator compatibility, and compact AGE rendering;
+- comma-joined Workspace placement Clusters, Administrator, and compact AGE
+  rendering;
 - Namespace compact AGE and unknown timestamp rendering;
 - Cluster Provider and Kubernetes Version rendering, including empty Provider
   cells;
 - empty-list `No resources found` output;
 - JSON and YAML preservation of both supported list envelopes and single
-  Workspace responses;
+  WorkspaceTemplate responses;
 - invalid names, arguments, output formats, malformed responses, HTTP errors,
   and output failures; and
 - no regression to the existing kubectl-derived `get` and `describe`
@@ -229,8 +229,8 @@ test suites, formatting, module consistency, vet, both binary builds, and
 
 ## Documentation
 
-Update `docs/cli.md` with the tenant command syntax, aliases, optional
-Workspace scope, output modes, and Cluster-routing exception. Update
+Update `docs/cli.md` with the tenant command syntax, aliases, long-form
+Workspace scope, output modes, and Cluster-routing exceptions. Update
 `docs/design.md` with the native `/kapis` tenant pipeline and its difference
 from kubectl-derived resource commands. Add the new command surface to
 `README.md` and record the feature in `CHANGELOG.md`.
