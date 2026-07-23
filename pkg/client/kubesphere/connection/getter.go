@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	internalrest "github.com/kubesphere/ksctl/internal/kubesphererest"
 	"github.com/kubesphere/ksctl/pkg/auth"
 	clientoptions "github.com/kubesphere/ksctl/pkg/client"
 	"github.com/kubesphere/ksctl/pkg/config"
@@ -150,7 +151,7 @@ func (g *RESTClientGetter) loadConfig() {
 		if g.transport != nil {
 			g.restConfig.Transport = g.transport
 		} else {
-			g.restConfig.TLSClientConfig = toKubeSphereTLSClientConfig(resolved.TLSClientConfig, g.options.InsecureSkipTLSVerify)
+			g.restConfig.TLSClientConfig = internalrest.TLSClientConfig(resolved.TLSClientConfig, g.options.InsecureSkipTLSVerify)
 		}
 	})
 }
@@ -171,18 +172,4 @@ func parseKubeSphereTimeout(value string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid request timeout %q: %w", value, err)
 	}
 	return timeout, nil
-}
-
-func toKubeSphereTLSClientConfig(cfg config.TLSClientConfig, insecureOverride bool) kubesphererest.TLSClientConfig {
-	return kubesphererest.TLSClientConfig{
-		Insecure:   cfg.Insecure || insecureOverride,
-		ServerName: cfg.ServerName,
-		CertFile:   cfg.CertFile,
-		KeyFile:    cfg.KeyFile,
-		CAFile:     cfg.CAFile,
-		CertData:   []byte(cfg.CertData),
-		KeyData:    []byte(cfg.KeyData),
-		CAData:     []byte(cfg.CAData),
-		NextProtos: cfg.NextProtos,
-	}
 }
