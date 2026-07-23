@@ -9,6 +9,7 @@ the Kubernetes resources exposed through KubeSphere. Use it as the standalone
 
 - Inspect KubeSphere and Kubernetes resources with kubectl-compatible `get`
   and `describe` commands.
+- Inspect KSE tenant Workspaces, Namespaces, and Clusters with `tenant get`.
 - Log in interactively or supply credentials for scripts and automation.
 - Select KubeSphere Contexts, member Clusters, Namespaces, and Projects.
 - Generate kubeconfig for the selected KubeSphere user and Cluster.
@@ -55,6 +56,9 @@ Log in, then inspect KubeSphere and Kubernetes resources:
 ksctl auth login
 ksctl get workspaces
 ksctl get pods -A
+ksctl tenant get workspace
+ksctl tenant get ns --workspace demo --cluster member-1
+ksctl tenant get cluster --workspace demo
 ```
 
 Interactive login prompts for missing connection and account values, reads the

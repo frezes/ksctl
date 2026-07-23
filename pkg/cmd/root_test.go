@@ -282,6 +282,131 @@ func TestRootRegistersNestedAuthCommands(t *testing.T) {
 	}
 }
 
+func TestRootRegistersTenantGetCommands(t *testing.T) {
+	for _, root := range []*cobra.Command{
+		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+	} {
+		tenant := findSubcommand(root, "tenant")
+		if tenant == nil {
+			t.Fatal("tenant command is not registered")
+		}
+		get := findSubcommand(tenant, "get")
+		if get == nil {
+			t.Fatal("tenant get command is not registered")
+		}
+		for _, name := range []string{"workspace", "namespace", "cluster"} {
+			if findSubcommand(get, name) == nil {
+				t.Fatalf("tenant get %s command is not registered", name)
+			}
+		}
+	}
+}
+
+func TestRootTenantGetUsesContextDefaultClusterOnlyForNamespaces(t *testing.T) {
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"totalItems":0}`))
+	}))
+	defer server.Close()
+
+	cfg := config.New()
+	cfg.CurrentContext = "local"
+	cfg.Fleets["local"] = config.Fleet{
+		Host:  server.URL,
+		Users: map[string]config.User{"admin": {BearerToken: "secret"}},
+	}
+	cfg.Contexts["local"] = config.Context{
+		Fleet:          "local",
+		User:           "admin",
+		DefaultCluster: "member",
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"tenant", "get", "workspace", "-o", "json"},
+		{"tenant", "get", "ns", "-o", "json"},
+		{"tenant", "get", "cluster", "-o", "json"},
+	} {
+		command := NewRootCommand(
+			IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)},
+			VersionInfo{Version: "test"},
+		)
+		command.SetArgs(args)
+		if err := command.Execute(); err != nil {
+			t.Fatalf("Execute(%v) error = %v", args, err)
+		}
+	}
+
+	want := []string{
+		"/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates",
+		"/clusters/member/kapis/tenant.kubesphere.io/v1beta1/namespaces",
+		"/kapis/tenant.kubesphere.io/v1beta1/clusters",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+}
+
+func TestRootTenantFleetResourcesIgnoreInvalidExplicitCluster(t *testing.T) {
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"totalItems":0}`))
+	}))
+	defer server.Close()
+
+	for _, resource := range []string{"workspace", "cluster"} {
+		command := NewRootCommand(
+			IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)},
+			VersionInfo{Version: "test"},
+		)
+		command.SetArgs([]string{
+			"--endpoint", server.URL,
+			"--token", "secret",
+			"--cluster", "team/member",
+			"tenant", "get", resource, "-o", "json",
+		})
+		if err := command.Execute(); err != nil {
+			t.Fatalf("tenant get %s error = %v, want invalid cluster ignored", resource, err)
+		}
+	}
+
+	namespace := NewRootCommand(
+		IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	namespace.SetArgs([]string{
+		"--endpoint", server.URL,
+		"--token", "secret",
+		"--cluster", "team/member",
+		"tenant", "get", "ns", "-o", "json",
+	})
+	if err := namespace.Execute(); err == nil || !strings.Contains(err.Error(), "invalid cluster") {
+		t.Fatalf("tenant get ns error = %v, want invalid cluster", err)
+	}
+
+	want := []string{
+		"/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates",
+		"/kapis/tenant.kubesphere.io/v1beta1/clusters",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+}
+
 func TestRootConnectionFlags(t *testing.T) {
 	cmd := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
 	for _, name := range []string{

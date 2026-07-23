@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the server-side User and global role.
 - Add kubectl-compatible `ksctl-*` executable plugins to both `ksctl` and
   `kubectl ks`, including longest-name dispatch and `plugin list` diagnostics.
+- Add `tenant get` commands for KSE Workspaces, Namespaces, and Clusters with
+  Workspace and member-Cluster routing plus kubectl-style table output.
 
 ## [0.1.0] - 2026-07-17
 

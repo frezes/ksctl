@@ -54,6 +54,7 @@ ksctl config generate kubeconfig --help
 | --- | --- |
 | `ksctl get TYPE [NAME]` | Display one or more resources. |
 | `ksctl describe TYPE [NAME_PREFIX]` | Display resource details and related information. |
+| `ksctl tenant get RESOURCE` | Display KSE tenant Workspaces, Namespaces, or Clusters. |
 | `ksctl auth login [ENDPOINT]` | Authenticate with a username and password, then save a Context and token cache. |
 | `ksctl auth whoami` | Verify the selected credential and display the server-side User and global role. |
 | `ksctl auth logout [CONTEXT]` | Delete cached login credentials for the current or named Context. |
@@ -311,6 +312,44 @@ ksctl get pods -o custom-columns=NAME:.metadata.name
 Supported formats are listed by `ksctl get --help` and come from the pinned
 kubectl implementation.
 
+### Get tenant resources
+
+`tenant get` reads KSE tenant resources directly from
+`/kapis/tenant.kubesphere.io/v1beta1`:
+
+```bash
+ksctl tenant get workspace
+ksctl tenant get workspace platform-regular
+ksctl tenant get ns
+ksctl tenant get ns --workspace platform-regular
+ksctl tenant get ns --workspace platform-regular --cluster member-1
+ksctl tenant get cluster
+ksctl tenant get cluster --workspace platform-regular
+```
+
+Accepted resource names are `workspace`/`workspaces`,
+`namespace`/`namespaces`/`ns`, and `cluster`/`clusters`. Workspace intentionally
+has no `ws` alias. The `--workspace WORKSPACE` flag is available only for
+Namespaces and Clusters and has no `-w` shorthand.
+
+Workspace requests use `workspacetemplates` and always remain Fleet-scoped:
+
+```text
+/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates
+/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates/NAME
+```
+
+Cluster requests are also always Fleet-scoped. Namespace requests automatically
+use the resolved Cluster from an explicit `--cluster` or the selected Context's
+`defaultCluster`; when present, requests receive the
+`/clusters/CLUSTER` prefix. Consequently, `--cluster` does not alter Workspace
+or tenant Cluster requests.
+
+Without `-o`, `tenant get` prints kubectl-style tables. Workspace columns are
+`NAME`, `CLUSTERS`, `ADMINISTRATOR`, and `AGE`; Namespace columns are `NAME`,
+`STATUS`, and `AGE`; Cluster columns are `NAME`, `PROVIDER`, and `VERSION`.
+Use `-o json` or `-o yaml` to retain the complete KSE response envelope.
+
 ## Generate kubeconfig
 
 Generate kubeconfig for the current logged-in User:
@@ -409,6 +448,9 @@ ksctl get workspaces
 ksctl describe workspace demo
 ksctl get clusters
 ksctl describe cluster member-1
+ksctl tenant get workspace
+ksctl tenant get ns --workspace demo --cluster member-1
+ksctl tenant get cluster --workspace demo
 ```
 
 Inspect Kubernetes resources through a member Cluster:
