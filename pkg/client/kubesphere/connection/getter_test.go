@@ -128,7 +128,7 @@ func TestRESTClientGetterRejectsInvalidClusterBeforeResolvingToken(t *testing.T)
 	}{
 		{
 			name:    "explicit cluster",
-			options: clientoptions.Options{Endpoint: "https://ks.example.com", Cluster: "team/member"},
+			options: clientoptions.Options{Endpoint: "https://ks.example.com", Token: "secret", Cluster: "team/member"},
 		},
 		{
 			name: "context default cluster",

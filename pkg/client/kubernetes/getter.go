@@ -132,12 +132,11 @@ func (g *RESTClientGetter) loadConfig() {
 			return
 		}
 		resolved, err := auth.Resolve(auth.ResolveInput{
-			EndpointFlag:  g.options.Endpoint,
-			TokenFlag:     g.options.Token,
-			ContextFlag:   g.options.Context,
-			ClusterFlag:   g.options.Cluster,
-			NoInteractive: g.options.NoInteractive,
-			Config:        cfg,
+			EndpointFlag: g.options.Endpoint,
+			TokenFlag:    g.options.Token,
+			ContextFlag:  g.options.Context,
+			ClusterFlag:  g.options.Cluster,
+			Config:       cfg,
 		})
 		if err != nil {
 			g.configErr = err
