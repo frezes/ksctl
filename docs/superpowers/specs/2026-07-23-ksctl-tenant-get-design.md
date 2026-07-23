@@ -110,24 +110,34 @@ YAML. Both modes preserve the original top-level envelope, count field,
 resource fields, and item order. They do not replace list responses with a
 client-defined schema.
 
-Default table output preserves server item order and prints a header even when
-the list is empty:
+Default table output preserves server item order and follows the familiar
+kubectl column layout for the corresponding resources:
 
 | Resource | Columns |
 | --- | --- |
-| Workspace | `NAME`, `MANAGER` |
-| Namespace | `NAME`, `STATUS` |
-| Cluster | `NAME`, `STATUS`, `KUBERNETES VERSION`, `KUBESPHERE VERSION`, `NODES` |
+| Workspace | `NAME`, `CLUSTERS`, `ADMINISTRATOR`, `CREATION TIME` |
+| Namespace | `NAME`, `STATUS`, `AGE` |
+| Cluster | `NAME`, `PROVIDER`, `VERSION` |
 
-The Workspace name is `metadata.name`. Manager is read from `spec.manager`,
-with `spec.template.spec.manager` as a compatibility fallback for a
-WorkspaceTemplate response. Namespace status is `status.phase`.
+Workspace values are read from `metadata.name`,
+`spec.placement.clusters[*].name`, `spec.template.spec.manager`, and
+`metadata.creationTimestamp`. Multiple explicit Cluster names are joined with
+commas in their response order. For a Cluster-scoped Workspace response,
+`spec.manager` supplies the Administrator and the effective Cluster supplies
+the Clusters value when placement is absent. Creation Time is rendered in
+local time as `YYYY-MM-DD HH:MM:SS`.
 
-Cluster status is derived from the `Ready` entry in `status.conditions`:
-`True` displays `Ready`, `False` displays `NotReady`, and an unknown or absent
-condition displays `Unknown`. The remaining Cluster columns use
-`status.kubernetesVersion`, `status.kubeSphereVersion`, and
-`status.nodeCount`. Missing optional values display `<none>`.
+Namespace Status is `status.phase`. AGE is the kubectl-style compact duration
+since `metadata.creationTimestamp`, such as `8d`, and is `<unknown>` when the
+timestamp is absent or invalid.
+
+Cluster columns match the KSE 4.2.1 Cluster CRD printer columns:
+`metadata.name`, `spec.provider`, and `status.kubernetesVersion`. Missing
+optional string values render as an empty table cell, matching kubectl's
+table behavior.
+
+When a list has no items, table output prints `No resources found` rather than
+an empty header-only table.
 
 ## Components
 
@@ -198,10 +208,13 @@ Implementation follows test-driven development. Focused tests cover:
   Namespace;
 - explicit and default Clusters being ignored by both Cluster-list paths;
 - authorization headers, user agent, and request timeout reuse;
-- default Workspace, Namespace, and Cluster table columns and values;
-- Workspace manager compatibility fallback;
-- Cluster Ready, NotReady, and Unknown rendering;
-- empty-list tables;
+- default Workspace, Namespace, and Cluster kubectl-style columns and values;
+- comma-joined Workspace placement Clusters, the Cluster-scoped Workspace
+  fallback, Administrator compatibility, and local Creation Time formatting;
+- Namespace compact AGE and unknown timestamp rendering;
+- Cluster Provider and Kubernetes Version rendering, including empty Provider
+  cells;
+- empty-list `No resources found` output;
 - JSON and YAML preservation of both supported list envelopes and single
   Workspace responses;
 - invalid names, arguments, output formats, malformed responses, HTTP errors,
