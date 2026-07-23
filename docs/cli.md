@@ -348,7 +348,7 @@ or tenant Cluster requests.
 Without `-o`, `tenant get` prints kubectl-style tables. Workspace columns are
 `NAME`, `CLUSTERS`, `ADMINISTRATOR`, and `AGE`; Namespace columns are `NAME`,
 `STATUS`, and `AGE`; Cluster columns are `NAME`, `PROVIDER`, and `VERSION`.
-Use `-o json` or `-o yaml` for the unmodified KSE response envelope.
+Use `-o json` or `-o yaml` to retain the complete KSE response envelope.
 
 ## Generate kubeconfig
 

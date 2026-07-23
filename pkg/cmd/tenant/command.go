@@ -95,11 +95,13 @@ func runGet(ctx context.Context, out io.Writer, getter RESTClientGetter, request
 	if getter == nil {
 		return fmt.Errorf("KubeSphere REST client getter is required")
 	}
-	cluster, err := getter.KubeSphereCluster()
-	if err != nil {
-		return fmt.Errorf("resolve tenant cluster: %w", err)
+	if request.Resource == ResourceNamespace {
+		cluster, err := getter.KubeSphereCluster()
+		if err != nil {
+			return fmt.Errorf("resolve tenant cluster: %w", err)
+		}
+		request.Cluster = cluster
 	}
-	request.Cluster = cluster
 	config, err := getter.ToRESTConfig()
 	if err != nil {
 		return fmt.Errorf("resolve tenant connection: %w", err)

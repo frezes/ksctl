@@ -22,15 +22,15 @@ func TestClientGetRoutesTenantResources(t *testing.T) {
 		wantList bool
 	}{
 		{
-			name:     "workspace template list ignores cluster",
-			request:  Request{Resource: ResourceWorkspace, Cluster: "ignored"},
+			name:     "workspace template list ignores invalid cluster",
+			request:  Request{Resource: ResourceWorkspace, Cluster: "team/member"},
 			wantPath: "/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates",
 			response: `{"items":[{"metadata":{"name":"platform"}}],"total_count":1}`,
 			wantList: true,
 		},
 		{
-			name:     "named workspace template ignores cluster",
-			request:  Request{Resource: ResourceWorkspace, Name: "platform", Cluster: "ignored"},
+			name:     "named workspace template ignores invalid cluster",
+			request:  Request{Resource: ResourceWorkspace, Name: "platform", Cluster: "team/member"},
 			wantPath: "/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates/platform",
 			response: `{"metadata":{"name":"platform"}}`,
 		},
@@ -49,15 +49,15 @@ func TestClientGetRoutesTenantResources(t *testing.T) {
 			wantList: true,
 		},
 		{
-			name:     "cluster list ignores cluster",
-			request:  Request{Resource: ResourceCluster, Cluster: "ignored"},
+			name:     "cluster list ignores invalid cluster",
+			request:  Request{Resource: ResourceCluster, Cluster: "team/member"},
 			wantPath: "/kapis/tenant.kubesphere.io/v1beta1/clusters",
 			response: `{"items":[{"metadata":{"name":"host"}}],"totalItems":1}`,
 			wantList: true,
 		},
 		{
-			name:     "workspace cluster list ignores cluster",
-			request:  Request{Resource: ResourceCluster, Workspace: "platform", Cluster: "ignored"},
+			name:     "workspace cluster list ignores invalid cluster",
+			request:  Request{Resource: ResourceCluster, Workspace: "platform", Cluster: "team/member"},
 			wantPath: "/kapis/tenant.kubesphere.io/v1beta1/workspaces/platform/clusters",
 			response: `{"items":[{"metadata":{"name":"host"}}],"totalItems":1}`,
 			wantList: true,

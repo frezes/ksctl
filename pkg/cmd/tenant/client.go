@@ -75,8 +75,10 @@ func requestSegments(request Request) ([]string, bool, error) {
 	if err := validateSegment("workspace", request.Workspace); err != nil {
 		return nil, false, err
 	}
-	if err := validateSegment("cluster", request.Cluster); err != nil {
-		return nil, false, err
+	if request.Resource == ResourceNamespace {
+		if err := validateSegment("cluster", request.Cluster); err != nil {
+			return nil, false, err
+		}
 	}
 
 	switch request.Resource {
