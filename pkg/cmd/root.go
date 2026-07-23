@@ -11,6 +11,7 @@ import (
 	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	clientkubesphereconnection "github.com/kubesphere/ksctl/pkg/client/kubesphere/connection"
 	plugincmd "github.com/kubesphere/ksctl/pkg/cmd/plugin"
+	tenantcmd "github.com/kubesphere/ksctl/pkg/cmd/tenant"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
@@ -104,6 +105,7 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 		extensionGetter,
 		kubeSphereFactory,
 	))
+	cmd.AddCommand(tenantcmd.NewCommand(kubeSphereGetter))
 
 	factory := cmdutil.NewFactory(kubernetesGetter)
 	kubeStreams := genericiooptions.IOStreams{
