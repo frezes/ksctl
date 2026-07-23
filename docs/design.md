@@ -50,7 +50,7 @@ show `kubectl ks`; command behavior and options otherwise remain shared.
 
 The root owns KubeSphere connection flags and constructs these command groups:
 
-- ksctl-owned `auth`, `config`, `plugin`, and `version` commands;
+- ksctl-owned `auth`, `config`, `plugin`, `tenant`, and `version` commands;
 - kubectl-owned `get` and `describe` commands; and
 - Cobra-provided help, completion, and shell-completion commands.
 
@@ -87,6 +87,20 @@ watching, table negotiation, printers, built-in Describers, generic describe
 fallback, Events, and most error behavior to the pinned kubectl implementation.
 It also means command-specific capabilities evolve only when the aligned
 Kubernetes dependencies are intentionally upgraded.
+
+### Native tenant pipeline
+
+The `pkg/cmd/tenant` package implements `tenant get` separately from kubectl's
+discovery-driven resource commands. It uses the KubeSphere REST client to call
+the KSE tenant API at `/kapis/tenant.kubesphere.io/v1beta1`, decodes the
+returned object or list envelope, and renders the default kubectl-style table
+or preserves the response envelope for JSON and YAML output.
+
+Workspace and tenant Cluster requests are Fleet-scoped and ignore the resolved
+Cluster. Namespace requests apply the resolved explicit or Context-default
+Cluster through the KubeSphere REST client's Cluster routing, which adds the
+`/clusters/<cluster>` prefix. An optional Workspace adds
+`/workspaces/<workspace>` to Namespace and tenant Cluster collection routes.
 
 The Factory consumes `pkg/client/kubernetes.RESTClientGetter`, which implements
 the four cli-runtime client interfaces:
