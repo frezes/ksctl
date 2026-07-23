@@ -115,7 +115,7 @@ kubectl column layout for the corresponding resources:
 
 | Resource | Columns |
 | --- | --- |
-| Workspace | `NAME`, `CLUSTERS`, `ADMINISTRATOR`, `CREATION TIME` |
+| Workspace | `NAME`, `CLUSTERS`, `ADMINISTRATOR`, `AGE` |
 | Namespace | `NAME`, `STATUS`, `AGE` |
 | Cluster | `NAME`, `PROVIDER`, `VERSION` |
 
@@ -124,8 +124,9 @@ Workspace values are read from `metadata.name`,
 `metadata.creationTimestamp`. Multiple explicit Cluster names are joined with
 commas in their response order. For a Cluster-scoped Workspace response,
 `spec.manager` supplies the Administrator and the effective Cluster supplies
-the Clusters value when placement is absent. Creation Time is rendered in
-local time as `YYYY-MM-DD HH:MM:SS`.
+the Clusters value when placement is absent. AGE uses the kubectl-style compact
+duration since `metadata.creationTimestamp`, such as `8d`, and is `<unknown>`
+when the timestamp is absent or invalid.
 
 Namespace Status is `status.phase`. AGE is the kubectl-style compact duration
 since `metadata.creationTimestamp`, such as `8d`, and is `<unknown>` when the
@@ -210,7 +211,7 @@ Implementation follows test-driven development. Focused tests cover:
 - authorization headers, user agent, and request timeout reuse;
 - default Workspace, Namespace, and Cluster kubectl-style columns and values;
 - comma-joined Workspace placement Clusters, the Cluster-scoped Workspace
-  fallback, Administrator compatibility, and local Creation Time formatting;
+  fallback, Administrator compatibility, and compact AGE rendering;
 - Namespace compact AGE and unknown timestamp rendering;
 - Cluster Provider and Kubernetes Version rendering, including empty Provider
   cells;
