@@ -105,6 +105,12 @@ ksctl auth login https://prod.example.com \
 Take care not to expose the password through shell history, logs, or process
 inspection when using `--password`.
 
+Each Fleet name is permanently associated with one normalized Endpoint.
+Logging in to an existing Fleet merges its Users and settings only when the
+Endpoint is unchanged (differences in surrounding whitespace or trailing `/`
+are ignored). To log in to another Endpoint, choose another Fleet name. A
+conflict is rejected before ksctl sends the OAuth request.
+
 ### Current identity
 
 Verify the selected Context's credentials and display its server-side identity:
@@ -169,6 +175,11 @@ ksctl get workspaces \
   --token "$KS_TOKEN"
 ```
 
+`--endpoint` and `KS_ENDPOINT` are explicit connection overrides. Either one
+must be paired with an explicit `--token` or `KS_TOKEN`; ksctl never combines
+an overridden Endpoint with credentials from the selected Context. Supplying
+only `KS_TOKEN` is valid when a Context supplies the Endpoint.
+
 ## Configuration and credentials
 
 ### Configuration file
@@ -203,6 +214,13 @@ password written manually into this file remains plaintext even though
 New configuration directories use mode `0700`; new configuration files use
 mode `0600`.
 
+Configuration is decoded strictly. Unknown or duplicate fields, legacy
+root-level `clusters` or `users`, unsupported `apiVersion` values, and
+unsupported `kind` values are errors. Missing `apiVersion` and `kind` still
+default to the current values. ksctl also refuses to save a Config whose type
+metadata it does not support, preventing an older binary from silently
+discarding newer fields.
+
 ### Context commands
 
 Inspect or select Context state with:
@@ -226,6 +244,8 @@ Credentials are selected in this order:
 ```
 
 - `--token` and `KS_TOKEN` bypass configured and cached credentials.
+- An explicit `--endpoint` or `KS_ENDPOINT` requires one of those explicit
+  Token sources and never falls through to Context credentials.
 - A configured Token File or Token is used directly and bypasses token cache
   refresh and password login. Read errors, empty Token Files, and subsequent
   API authorization failures do not fall through to another credential.
@@ -237,7 +257,10 @@ Credentials are selected in this order:
 
 `auth login` stores the complete KubeSphere OAuth response under
 `~/.ksctl/cache/tokens/<fleet>/<user>.json`. New cache directories use mode
-`0700`, and new cache files use mode `0600`.
+`0700`, and new cache files use mode `0600`. It writes the cache before the
+Config; if the Config write fails, ksctl restores the exact previous cache
+contents or removes the newly created entry. The success message is printed
+only after both writes complete.
 
 ## Inspect resources
 

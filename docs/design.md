@@ -128,8 +128,9 @@ hard-coded list of user-visible KubeSphere resources.
 
 `pkg/client.Options` is the command-to-client input model. It carries Endpoint,
 Token, Context, Cluster, Namespace, request timeout, config path, user agent,
-and internal connection switches. Cobra binds the public root flags to one
-Options value shared by both client getters.
+and TLS verification settings. Cobra binds the public root flags to one Options
+value shared by both client getters. Interactive input is not a client concern;
+it is owned by the `auth login` command and its terminal prompter.
 
 ### Kubernetes client adapter
 
@@ -157,6 +158,11 @@ retrieval, with either a generated HTTP client or an injected client for tests.
 selected Cluster, and selected username. Unlike the Kubernetes getter, its base
 REST config keeps the Fleet Endpoint unscoped; a KubeSphere-native request adds
 Cluster scope explicitly when its API supports it.
+
+`internal/kubesphererest` is the sole adapter from ksctl's TLS configuration to
+`kubesphere.io/client-go/rest.TLSClientConfig`. OAuth and the KubeSphere
+connection getter both use it. The Kubernetes adapter remains separate because
+it targets the `k8s.io/client-go/rest` type.
 
 ## Configuration model
 
@@ -190,9 +196,12 @@ Context is the default selection. An explicit `--context` chooses another
 Context for one invocation; an explicit `--cluster` overrides its
 `defaultCluster`.
 
-Missing files load as an initialized empty Config. Loading fills absent API
-version, kind, Fleet map, and Context map defaults, but it does not migrate
-legacy root-level Users or earlier Cluster models.
+Missing and empty files load as an initialized empty Config. Loading fills
+absent API version, kind, Fleet map, and Context map defaults. Non-empty files
+are decoded strictly: unknown fields, duplicate fields, type mismatches, legacy
+root-level Users or Cluster models, unsupported API versions, and unsupported
+kinds are errors. Saving uses the same type-contract validation and refuses to
+rewrite a Config version or kind the binary does not understand.
 
 ## Authentication model
 
@@ -209,6 +218,11 @@ Endpoint selection is:
 ```text
 --endpoint > KS_ENDPOINT > selected Fleet host
 ```
+
+An Endpoint selected by `--endpoint` or `KS_ENDPOINT` must be paired with a
+Token selected by `--token` or `KS_TOKEN`. Resolution fails before consulting
+Context credentials when the pair is incomplete. Supplying only `KS_TOKEN`
+remains valid: the selected Fleet supplies its Endpoint and TLS settings.
 
 Credential selection is:
 
@@ -228,12 +242,23 @@ may obtain an Access Token for the current command, but that response is not
 cached. Malformed or otherwise unreadable cache data is an error rather than a
 reason to ignore the file.
 
-`auth login` is the explicit cache-creation path. It resolves interactive or
-fully supplied input, performs the password grant, then saves non-secret Fleet,
-User, and Context metadata plus the complete OAuth response. It never stores
-the supplied Password. `auth logout` asks KubeSphere to revoke the cached
-Access Token, deletes the Fleet/User cache regardless of the remote result, and
-preserves configuration.
+`auth login` is the explicit cache-creation path. A Fleet name owns one
+normalized Endpoint. Before authentication, login loads the Config and rejects
+an existing Fleet whose non-empty Host differs from the login Endpoint; this
+prevents one Fleet/User cache coordinate from holding credentials for different
+servers. Same-Endpoint login merges the Fleet's existing TLS settings, Users,
+and manually configured credentials.
+
+After the password grant, login builds the Config update in memory, captures
+the exact previous Fleet/User cache bytes, atomically saves the new cache, then
+atomically saves the Config. If Config saving fails, an idempotent rollback
+restores the previous cache bytes (including malformed data) or removes a cache
+entry created by this login. The original save error is joined with any
+rollback error. Success is printed only after both writes complete. The
+supplied Password is never persisted.
+
+`auth logout` asks KubeSphere to revoke the cached Access Token, deletes the
+Fleet/User cache regardless of the remote result, and preserves configuration.
 
 `auth whoami` is server-backed. It resolves the selected Context's User name,
 builds an authenticated Fleet-level KubeSphere REST client, and reads:
@@ -333,6 +358,11 @@ and their own flag and connection handling.
 - `config view` redacts Passwords, bearer Tokens, and TLS private key data by
   default; `--raw` is an explicit sensitive-output escape hatch.
 - OAuth errors are constructed without embedding request credentials.
+- Explicit Endpoint overrides cannot borrow credentials from a selected
+  Context.
+- A Fleet name cannot be rebound to another Endpoint by login.
+- A returned login persistence failure leaves the Config unchanged and
+  compensates the Token cache write.
 - Generated kubeconfig and raw config output can contain credentials and must
   be protected by the caller.
 - Plugins are not inspected or sandboxed. Trust in a plugin is equivalent to
@@ -361,8 +391,8 @@ The architecture is protected at several levels:
 
 - command tests verify both display names, registered commands and flags,
   version behavior, resource requests, and member-Cluster routing;
-- config tests verify defaults, serialization, redaction, migration boundaries,
-  and filesystem permissions;
+- config tests verify defaults, strict schema and type-contract rejection,
+  serialization, redaction, and filesystem permissions;
 - authentication and cache tests verify precedence, login and refresh behavior,
   error disclosure, Fleet/User cache identity, encoding, and permissions;
 - Kubernetes client tests verify TLS and Token mapping, Cluster Endpoint
