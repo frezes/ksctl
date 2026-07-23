@@ -8,7 +8,6 @@ type Options struct {
 	Namespace             string
 	RequestTimeout        string
 	InsecureSkipTLSVerify bool
-	NoInteractive         bool
 	ConfigPath            string
 	UserAgent             string
 }

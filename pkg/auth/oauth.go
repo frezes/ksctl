@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	internalrest "github.com/kubesphere/ksctl/internal/kubesphererest"
 	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
 	"github.com/kubesphere/ksctl/pkg/config"
 	kubesphererest "kubesphere.io/client-go/rest"
@@ -77,7 +78,7 @@ func (o *OAuth) Logout(ctx context.Context, options LogoutOptions) error {
 		UserAgent:       options.UserAgent,
 		Timeout:         options.Timeout,
 		WarningHandler:  kubesphererest.NoWarnings{},
-		TLSClientConfig: toKubeSphereTLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
+		TLSClientConfig: internalrest.TLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
 	}
 	config.Wrap(redactLogoutResponses)
 	client, err := o.factory.ForConfig(config)
@@ -120,7 +121,7 @@ func (o *OAuth) requestToken(ctx context.Context, options TokenRequestOptions, f
 		Host:            options.Endpoint,
 		UserAgent:       options.UserAgent,
 		Timeout:         options.Timeout,
-		TLSClientConfig: toKubeSphereTLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
+		TLSClientConfig: internalrest.TLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
 	}
 	config.Wrap(redactOAuthErrorResponses)
 	client, err := o.factory.ForConfig(config)
@@ -169,18 +170,4 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
-}
-
-func toKubeSphereTLSClientConfig(cfg config.TLSClientConfig, insecureOverride bool) kubesphererest.TLSClientConfig {
-	return kubesphererest.TLSClientConfig{
-		Insecure:   cfg.Insecure || insecureOverride,
-		ServerName: cfg.ServerName,
-		CertFile:   cfg.CertFile,
-		KeyFile:    cfg.KeyFile,
-		CAFile:     cfg.CAFile,
-		CertData:   []byte(cfg.CertData),
-		KeyData:    []byte(cfg.KeyData),
-		CAData:     []byte(cfg.CAData),
-		NextProtos: cfg.NextProtos,
-	}
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubesphere/ksctl/internal/securefile"
@@ -113,6 +114,31 @@ func Save(dir, fleet, user string, entry Entry) error {
 		return err
 	}
 	return securefile.Write(Path(dir, fleet, user), data)
+}
+
+func SaveWithRollback(dir, fleet, user string, entry Entry) (func() error, error) {
+	path := Path(dir, fleet, user)
+	previous, readErr := os.ReadFile(path)
+	existed := readErr == nil
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return nil, readErr
+	}
+	if err := Save(dir, fleet, user, entry); err != nil {
+		return nil, err
+	}
+
+	var once sync.Once
+	var rollbackErr error
+	return func() error {
+		once.Do(func() {
+			if existed {
+				rollbackErr = securefile.Write(path, previous)
+				return
+			}
+			rollbackErr = Delete(dir, fleet, user)
+		})
+		return rollbackErr
+	}, nil
 }
 
 func Delete(dir, fleet, user string) error {
