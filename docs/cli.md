@@ -3,9 +3,10 @@
 ## Overview
 
 `ksctl` is a command-line client for inspecting KubeSphere 4.x resources and
-the Kubernetes resources exposed through KubeSphere. Its built-in resource
-commands are read-only: `get` displays resources and `describe` displays their
-detailed state.
+the Kubernetes resources exposed through KubeSphere. Its generic built-in
+resource commands are read-only: `get` displays resources and `describe`
+displays their detailed state. The purpose-built `extension` group is the
+controlled exception for KubeSphere extension lifecycle management.
 
 The release provides two equivalent entrypoints backed by the same command
 tree:
@@ -61,6 +62,7 @@ ksctl config generate kubeconfig --help
 | `ksctl config current-context` | Display the current Context name. |
 | `ksctl config use-context NAME` | Select an existing Context. |
 | `ksctl config generate kubeconfig` | Write the selected user's kubeconfig to stdout. |
+| `ksctl extension` | Discover, install, configure, diagnose, and remove KubeSphere extensions. |
 | `ksctl plugin list` | List and diagnose `ksctl-*` executable plugins on `PATH`. |
 | `ksctl completion SHELL` | Generate a completion script for bash, fish, PowerShell, or zsh. |
 | `ksctl version` | Display the ksctl, KubeSphere, and Kubernetes versions. |
@@ -168,6 +170,144 @@ ksctl get workspaces \
   --endpoint https://kubesphere.example.com \
   --token "$KS_TOKEN"
 ```
+
+## Manage extensions
+
+The extension workflow is available through both `ksctl extension` and
+`kubectl ks extension`:
+
+```text
+ksctl extension list [--category CATEGORY] [--installed] [-o table|wide|json|yaml]
+ksctl extension show NAME [--version VERSION] [-o table|json|yaml]
+ksctl extension versions NAME [-o table|json|yaml]
+ksctl extension status [NAME] [--watch] [--wait-timeout 10m]
+ksctl extension install NAME --version VERSION [configuration flags] [--wait]
+ksctl extension upgrade NAME --version VERSION [configuration flags] [--wait]
+ksctl extension configure NAME [configuration flags] [--wait]
+ksctl extension uninstall NAME [--wait]
+ksctl extension diagnose NAME [--target-cluster CLUSTER]
+```
+
+Extension resources are always managed on the KubeSphere host. A Context's
+`defaultCluster` does not route these requests, and extension commands reject
+the root `--cluster` and `--namespace` flags. Use `--clusters` to define
+extension placement and `diagnose --target-cluster` to select a member status.
+Even for a selected member status, diagnosis reads the controller Job and Pods
+from the host.
+
+### Discover and inspect
+
+List the catalog, filter it, inspect one extension, or display its exact
+versions:
+
+```bash
+ksctl extension list
+ksctl extension list --category observability --installed
+ksctl extension list -o wide
+ksctl extension show logging
+ksctl extension show logging --version 1.2.1
+ksctl extension versions logging
+ksctl extension status
+ksctl extension status logging
+ksctl extension status logging --watch --wait-timeout 10m
+```
+
+JSON and YAML preserve complete server objects, including fields unknown to
+this ksctl release. `status --watch` requires a name and table output.
+
+### Install and upgrade exact versions
+
+Install and upgrade require an exact, opaque `--version`; ksctl does not select
+the recommended version or rewrite a `v` prefix:
+
+```bash
+ksctl extension install logging --version 1.2.1
+ksctl extension upgrade logging --version 1.3.0
+```
+
+Lifecycle commands are asynchronous by default. After the API accepts a
+request, they print one `requested` line and return. Add `--wait` to poll for
+completion; `--wait-timeout` defaults to 10 minutes and is valid only with
+`--wait`:
+
+```bash
+ksctl extension install logging --version 1.2.1 --wait
+ksctl extension upgrade logging --version 1.3.0 \
+  --wait --wait-timeout 20m
+```
+
+Before install or upgrade, ksctl verifies all required extension dependencies.
+It reports an unmet dependency and does not create dependency InstallPlans
+automatically.
+
+### Configuration and multicluster placement
+
+Read global configuration from a file or stdin:
+
+```bash
+ksctl extension install logging --version 1.2.1 \
+  --config ./logging-values.yaml
+
+generate-values | ksctl extension configure logging --config -
+```
+
+Place a multicluster extension explicitly and add repeatable per-Cluster
+overrides:
+
+```bash
+ksctl extension install logging --version 1.2.1 \
+  --clusters member-a,member-b \
+  --override member-a=./member-a.yaml \
+  --override member-b=./member-b.yaml
+```
+
+Upgrade can change configuration and placement in the same guarded update:
+
+```bash
+ksctl extension upgrade logging --version 1.3.0 \
+  --config ./logging-v1.3.yaml \
+  --clusters member-a,member-c \
+  --override member-c=./member-c.yaml
+```
+
+Configure keeps the current exact version. Omitted fields are preserved;
+positive and clear flags for one field are mutually exclusive:
+
+```bash
+ksctl extension configure logging --config ./logging-values.yaml
+ksctl extension configure logging --remove-override member-b
+ksctl extension configure logging --clear-config
+ksctl extension configure logging --clear-cluster-scheduling
+```
+
+At most one `--config` or `--override` input may read stdin during one
+invocation. Configuration and overrides must be non-empty, single-document
+YAML.
+
+### Uninstall and diagnose
+
+Uninstall deletes the InstallPlan directly without an interactive
+confirmation. The default returns after deletion is accepted; `--wait` polls
+until the InstallPlan is gone:
+
+```bash
+ksctl extension uninstall logging
+ksctl extension uninstall logging --wait
+```
+
+Diagnosis prints ordered checks for the Extension, InstallPlan, exact version,
+dependencies, target Namespace, controller Job, Pods, member statuses, and
+timestamp consistency:
+
+```bash
+ksctl extension diagnose logging
+ksctl extension diagnose logging --target-cluster member-a
+```
+
+Diagnosis never retrieves logs, Secrets, or rendered Helm values. When further
+inspection is useful, it prints a `kubectl logs` command for the user to run.
+Warnings do not fail diagnosis; definite `ERROR` checks produce a non-zero
+exit status after the check table is printed.
 
 ## Configuration and credentials
 
