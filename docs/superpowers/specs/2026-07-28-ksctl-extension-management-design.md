@@ -152,11 +152,13 @@ remove a `v` prefix, or substitute `recommendedVersion`. The corresponding
 ExtensionVersion must exist and its `spec.version` must equal the requested
 value.
 
-Extension and Cluster names are validated as Kubernetes path segments before
-the connection is resolved. The ExtensionVersion lookup is constrained by the
-`kubesphere.io/extension-ref=<name>` label and then matched by exact
-`spec.version`, avoiding assumptions about how the version is encoded in the
-resource name.
+Extension names are validated as Kubernetes path segments before the
+connection is resolved. Cluster names additionally must be DNS-1123
+subdomains. Controller-facing exact-version operations directly GET the
+ExtensionVersion resource named `<extension>-<version>` and verify both its
+`metadata.name` and exact `spec.version`. This mirrors the KubeSphere
+controller's lookup contract; label-filtered lists are used only for catalog
+version discovery.
 
 ## Query Commands
 
@@ -181,11 +183,13 @@ as installed.
 Default columns:
 
 ```text
-NAME  CATEGORY  RECOMMENDED  INSTALLED  STATE
+NAME  CATEGORY  RECOMMENDED  INSTALLED  TARGET  STATE
 ```
 
 Wide output adds provider and enabled state when available. Table rows are
-sorted by extension name.
+sorted by extension name. `INSTALLED` is an observed successful version and
+never falls back to `spec.extension.version`; `TARGET` is the requested spec
+version.
 
 ### `extension show`
 
@@ -203,6 +207,7 @@ Provider
 State
 Enabled
 Installed Version
+Target Version
 Recommended Version
 Versions
 Conditions
@@ -285,10 +290,12 @@ Install, upgrade, and configure accept:
 `--override` is repeatable. `--config -` or an override whose file is `-` reads
 stdin. At most one input in an invocation may consume stdin.
 
-Configuration and overrides must be non-empty, single-document YAML. ksctl
-validates syntax before submitting a write. The original YAML text is retained
-apart from normalizing trailing line endings; the server remains responsible
-for schema-specific validation and merge semantics.
+Configuration and overrides must be non-empty, single-document YAML with a
+top-level mapping and no duplicate keys. ksctl validates both new inputs and
+retained existing values before submitting a write. It normalizes trailing
+line endings and the per-line trailing Unicode whitespace that the KubeSphere
+InstallPlan admission webhook removes; the server remains responsible for
+schema-specific validation and merge semantics.
 
 Cluster names are validated and de-duplicated without changing their first
 specified order. Scheduling fields are only allowed when the selected
@@ -313,6 +320,17 @@ For upgrade and configure:
 - `--remove-override CLUSTER` removes one override;
 - `--clear-config` removes `spec.config`; and
 - `--clear-cluster-scheduling` removes placement and all overrides.
+
+Clearing Cluster scheduling is encoded as an explicit empty placement while
+old member statuses are being removed. KubeSphere only runs its member cleanup
+loop for a non-nil `clusterScheduling`, so patching that field directly to
+`null` would leave member agents installed.
+
+An existing non-nil `clusterScheduling` without `placement` is rejected before
+mutation because the controller dereferences that field. The error directs the
+user to repair it with `--clusters` or `--clear-cluster-scheduling`. A Cluster
+whose stale status is `Uninstalling`, `UninstallFailed`, or `Uninstalled`
+cannot be targeted again until that status is removed.
 
 When the current placement uses only `clusterSelector`, ksctl cannot prove
 that a new `--override` target belongs to the selected set. Setting an
@@ -376,14 +394,15 @@ The target version must differ from the current `spec.extension.version`.
 A same-version request returns an error directing the user to
 `extension configure`, even if configuration flags were also supplied.
 
-Upgrade rejects an InstallPlan that is being deleted or is currently
-`Installing`, `Upgrading`, or `Uninstalling`.
+Upgrade rejects an InstallPlan that is being deleted, is `Uninstalled`, or is
+currently `Preparing`, `Installing`, `Upgrading`, or `Uninstalling`.
 
-The KubeSphere controller does not retry a host `InstallFailed` or
-`UpgradeFailed` plan for a version-only change. Upgrading either failed state
-therefore requires `--config` or `--clear-config` to produce a real change to
-the global `spec.config`; otherwise ksctl rejects the request before writing
-and explains that corrected global configuration is required.
+For a host `InstallFailed` or `UpgradeFailed` plan, ksctl mirrors the
+controller's retry predicate. A different observed target version or changed
+global config hash permits a retry, including a genuine version-only upgrade.
+If the status already reports the requested version and config hash, ksctl
+rejects the inert write and explains that a different version or corrected
+global configuration is required.
 
 The update includes the current `metadata.resourceVersion` as a concurrency
 precondition. A conflict is returned to the user rather than retried against
@@ -407,12 +426,12 @@ It gets the current InstallPlan and ExtensionVersion, validates the resulting
 configuration, enforces `upgradeStrategy: Manual`, and applies a
 resourceVersion-guarded JSON Merge Patch.
 
-Configure rejects an InstallPlan that is being deleted or is currently
-`Installing`, `Upgrading`, or `Uninstalling`. For a host `InstallFailed` or
-`UpgradeFailed` plan, configure requires `--config` or `--clear-config` to
-produce a real change to the global `spec.config`; scheduling-only and
-same-value configuration requests cannot make the controller retry that
-failure and are rejected before writing.
+Configure rejects an InstallPlan that is being deleted, is `Uninstalled`, or
+is currently `Preparing`, `Installing`, `Upgrading`, or `Uninstalling`. For a
+host `InstallFailed` or `UpgradeFailed` plan, configure requires a real change
+to the global `spec.config`; scheduling-only and same-value configuration
+requests cannot make the controller retry that failure and are rejected before
+writing.
 
 Configure returns after the patch by default or waits when `--wait` is present.
 
@@ -424,6 +443,10 @@ interactive confirmation.
 The default behavior returns after the delete request is accepted. With
 `--wait`, ksctl polls until the InstallPlan returns NotFound. The extension
 controller's finalizer remains responsible for completing Helm uninstall work.
+The DELETE carries the current `metadata.resourceVersion` precondition. When
+the controller protection finalizer is present, ksctl first verifies that the
+current exact ExtensionVersion resource still exists so deletion cannot become
+stuck on the controller's required lookup.
 
 If the InstallPlan enters `UninstallFailed` while it still exists, wait returns
 an error immediately with the relevant conditions.
@@ -499,9 +522,14 @@ extension/<name> uninstalled
 ```
 
 Known successful terminal states are `Installed`, `Upgraded`, and deletion
-NotFound as appropriate. Any state whose name ends in `Failed` is terminal
-failure. Empty or unknown non-failure states continue until success, failure,
-timeout, or Context cancellation.
+NotFound as appropriate. An ordinary target's advanced failure is terminal
+only when it belongs to the accepted attempt; `InstallFailed` and
+`UpgradeFailed` continue while the controller's version/config predicate says
+it will retry. A removed member waits for status deletion and treats
+`UninstallFailed` as its terminal failure; stale install/upgrade failures may
+legitimately advance while the controller proceeds to uninstall. Empty or
+unknown non-failure states continue until success, failure, timeout, or Context
+cancellation.
 
 An update may initially return the terminal status of the previous
 reconciliation. The waiter records the create or patch response as its
@@ -510,6 +538,21 @@ operation. It evaluates failure after a subsequent resource or status change;
 an immediate new success is still accepted. If the controller never observes
 the submitted change, the operation times out instead of returning the stale
 failure.
+
+The waiter scans every expected target for an advanced failure before deciding
+that another target is still pending. Placement changes wait for added
+members, removal of stale member statuses, and only retained members whose
+effective configuration actually changed. Configuration completion uses the
+controller-compatible effective config hash, including per-Cluster override
+merging, so an override that fully shadows a global change does not cause a
+false timeout. Upgrade placement changes also wait for removed members.
+
+Selector-only dynamic placement cannot produce a deterministic target set, so
+`--wait` is rejected before PATCH unless the invocation replaces the selector
+with explicit `--clusters`. The accepted response must preserve the requested
+config and scheduling semantics. During polling, a changed accepted spec,
+deletion timestamp, or UID fails as a superseded operation instead of reusing
+old status. Uninstall similarly rejects a same-name replacement UID.
 
 Failure errors include state conditions, target Namespace, and Job name when
 available.
@@ -531,7 +574,7 @@ resource identities such as `extension`, `version`, `install-plan`,
 Checks cover:
 
 - Extension existence and status;
-- exact installed ExtensionVersion availability;
+- exact controller target ExtensionVersion availability;
 - InstallPlan state and conditions;
 - required and optional dependencies;
 - target Namespace and Job existence;
@@ -541,6 +584,12 @@ Checks cover:
 - multicluster scheduling statuses; and
 - a Job that completed while its InstallPlan remains in an install or upgrade
   transition.
+
+A completed Job takes precedence over its historical failed-attempt count.
+Failed Pods belonging to a Job that later completed, and a recovered
+container's non-zero last termination, are warnings rather than current
+terminal failures. A deleting InstallPlan is an error check even if its stale
+status still says `Installed`.
 
 Default diagnosis inspects the host Job and Pod resources. For a multicluster
 extension:
@@ -614,6 +663,9 @@ before the server accepts it.
   layers.
 - Explicit Endpoint and Token security rules remain unchanged.
 - Resource names are validated before they enter request paths.
+- Human-readable cells escape terminal control sequences.
+- Extension commands reject `--v=8` and higher because the KubeSphere REST
+  client may log InstallPlan configuration bodies at that verbosity.
 - The command does not execute extension-provided code locally.
 - Diagnosis does not retrieve logs, Secrets, or rendered Helm values.
 
@@ -677,8 +729,9 @@ Fake client tests cover:
 - individual override set and removal;
 - selector-only placement requiring explicit clusters before adding an
   override;
-- failed host plans requiring a real global configuration change before
-  upgrade or configure;
+- failed host plans following the controller's version/config retry predicate;
+- accepted-response mutation and concurrent-operation supersession;
+- selector-only wait rejection and stale member cleanup;
 - resourceVersion conflicts;
 - async success;
 - install, upgrade, configure, and uninstall wait state sequences;
@@ -695,6 +748,7 @@ Command tests cover:
 - help and exact argument validation;
 - required `--version`;
 - output formats and stable tables;
+- terminal-control escaping and unsafe REST debug verbosity rejection;
 - stdin input and multiple-stdin rejection;
 - mutually exclusive flags;
 - explicit `--cluster` and `--namespace` rejection before requests;

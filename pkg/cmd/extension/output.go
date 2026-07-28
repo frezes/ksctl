@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	internalextension "github.com/kubesphere/ksctl/internal/extension"
+	"k8s.io/cli-runtime/pkg/printers"
 	"sigs.k8s.io/yaml"
 )
 
@@ -96,7 +98,14 @@ func printList(
 	result internalextension.ListResult,
 	format outputFormat,
 ) error {
-	headers := []string{"NAME", "CATEGORY", "RECOMMENDED", "INSTALLED", "STATE"}
+	headers := []string{
+		"NAME",
+		"CATEGORY",
+		"RECOMMENDED",
+		"INSTALLED",
+		"TARGET",
+		"STATE",
+	}
 	if format == outputWide {
 		headers = append(headers, "PROVIDER", "ENABLED")
 	}
@@ -106,12 +115,14 @@ func printList(
 		extension := item.Extension.Value
 		state := extension.Status.State
 		installedVersion := extension.Status.InstalledVersion
+		targetVersion := ""
 		if item.InstallPlan != nil {
 			plan := item.InstallPlan.Value
 			state = plan.Status.State
-			installedVersion = plan.Status.Version
-			if installedVersion == "" {
-				installedVersion = plan.Spec.Extension.Version
+			targetVersion = plan.Spec.Extension.Version
+			if successfulPlanState(plan.Status.State) &&
+				plan.Status.Version != "" {
+				installedVersion = plan.Status.Version
 			}
 		}
 		row := []string{
@@ -119,6 +130,7 @@ func printList(
 			scalar(extensionCategory(extension)),
 			scalar(extension.Status.RecommendedVersion),
 			scalar(installedVersion),
+			scalar(targetVersion),
 			scalar(state),
 		}
 		if format == outputWide {
@@ -201,25 +213,21 @@ func printShow(
 	result internalextension.ShowResult,
 ) error {
 	if result.SelectedVersion != nil {
-		return printSelectedVersion(out, result.SelectedVersion.Value)
+		return printSelectedVersion(out, result)
 	}
 	extension := result.Extension.Value
 	state := extension.Status.State
 	enabled := optionalBool(extension.Status.Enabled)
 	installedVersion := extension.Status.InstalledVersion
+	targetVersion := ""
 	if result.InstallPlan != nil {
 		plan := result.InstallPlan.Value
-		if state == "" {
-			state = plan.Status.State
-		}
-		if extension.Status.Enabled == nil {
-			enabled = installPlanEnabled(plan)
-		}
-		if installedVersion == "" {
+		targetVersion = plan.Spec.Extension.Version
+		state = plan.Status.State
+		enabled = installPlanEnabled(plan)
+		if successfulPlanState(plan.Status.State) &&
+			plan.Status.Version != "" {
 			installedVersion = plan.Status.Version
-			if installedVersion == "" {
-				installedVersion = plan.Spec.Extension.Version
-			}
 		}
 	}
 
@@ -242,6 +250,7 @@ func printShow(
 		{"State", scalar(state)},
 		{"Enabled", enabled},
 		{"Installed Version", scalar(installedVersion)},
+		{"Target Version", scalar(targetVersion)},
 		{"Recommended Version", scalar(extension.Status.RecommendedVersion)},
 		{"Versions", stringList(versionValues)},
 		{"Conditions", formatConditions(extension.Status.Conditions)},
@@ -249,11 +258,19 @@ func printShow(
 	return writeTable(out, rows)
 }
 
+func successfulPlanState(state string) bool {
+	return state == "Installed" || state == "Upgraded"
+}
+
 func printSelectedVersion(
 	out io.Writer,
-	version internalextension.ExtensionVersion,
+	result internalextension.ShowResult,
 ) error {
+	version := result.SelectedVersion.Value
 	extensionName := version.Metadata.Labels["kubesphere.io/extension-ref"]
+	if extensionName == "" {
+		extensionName = result.Extension.Value.Metadata.Name
+	}
 	rows := [][]string{
 		{"FIELD", "VALUE"},
 		{"Name", scalar(version.Metadata.Name)},
@@ -449,5 +466,11 @@ func tableCell(value string) string {
 	value = strings.ReplaceAll(value, "\t", " ")
 	value = strings.ReplaceAll(value, "\r", " ")
 	value = strings.ReplaceAll(value, "\n", " ")
-	return value
+	value = printers.EscapeTerminal(value)
+	return strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) {
+			return ' '
+		}
+		return character
+	}, value)
 }

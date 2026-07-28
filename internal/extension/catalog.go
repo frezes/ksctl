@@ -8,7 +8,6 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func (s *Service) List(ctx context.Context, options ListOptions) (ListResult, error) {
@@ -23,6 +22,15 @@ func (s *Service) List(ctx context.Context, options ListOptions) (ListResult, er
 
 	plansByName := make(map[string]Object[InstallPlan], len(plans.Items))
 	for _, plan := range plans.Items {
+		if err := ensurePlanIdentity(
+			plan.Value.Metadata.Name,
+			plan.Value,
+		); err != nil {
+			return ListResult{}, fmt.Errorf(
+				"validate listed InstallPlan: %w",
+				err,
+			)
+		}
 		plansByName[plan.Value.Metadata.Name] = plan
 	}
 
@@ -70,14 +78,9 @@ func (s *Service) Show(
 	if err != nil {
 		return ShowResult{}, err
 	}
-	versions, err := s.sortedVersions(ctx, name)
-	if err != nil {
-		return ShowResult{}, err
-	}
-
-	result := ShowResult{Extension: extension, Versions: versions}
+	result := ShowResult{Extension: extension}
 	if requestedVersion != "" {
-		selected, err := findExactVersion(name, requestedVersion, versions)
+		selected, err := s.exactVersion(ctx, name, requestedVersion)
 		if err != nil {
 			return ShowResult{}, err
 		}
@@ -85,8 +88,18 @@ func (s *Service) Show(
 		return result, nil
 	}
 
+	versions, err := s.sortedVersions(ctx, name)
+	if err != nil {
+		return ShowResult{}, err
+	}
+
+	result.Versions = versions
+
 	plan, err := s.client.GetInstallPlan(ctx, name)
 	if err == nil {
+		if err := ensurePlanIdentity(name, plan.Value); err != nil {
+			return ShowResult{}, err
+		}
 		result.InstallPlan = &plan
 	} else if !apierrors.IsNotFound(err) {
 		return ShowResult{}, err
@@ -158,30 +171,49 @@ func (s *Service) exactVersion(
 	if err := validatePathName("extension", name); err != nil {
 		return Object[ExtensionVersion]{}, err
 	}
-	versions, err := s.client.ListExtensionVersions(ctx, name)
+	resourceName := name + "-" + requested
+	version, err := s.client.GetExtensionVersion(ctx, resourceName)
 	if err != nil {
+		return Object[ExtensionVersion]{}, fmt.Errorf(
+			"KubeSphere controller requires resource %q for extension %q version %q: %w",
+			resourceName,
+			name,
+			requested,
+			err,
+		)
+	}
+	if err := ensureControllerVersionIdentity(
+		name,
+		requested,
+		version.Value,
+	); err != nil {
 		return Object[ExtensionVersion]{}, err
 	}
-	return findExactVersion(name, requested, versions)
+	return version, nil
 }
 
-func findExactVersion(
+func ensureControllerVersionIdentity(
 	name string,
 	requested string,
-	versions List[ExtensionVersion],
-) (Object[ExtensionVersion], error) {
-	for _, version := range versions.Items {
-		if version.Value.Spec.Version == requested {
-			return version, nil
-		}
+	version ExtensionVersion,
+) error {
+	resourceName := name + "-" + requested
+	if version.Metadata.Name != resourceName {
+		return fmt.Errorf(
+			"KubeSphere controller requires resource %q, but the API returned metadata.name %q",
+			resourceName,
+			version.Metadata.Name,
+		)
 	}
-	return Object[ExtensionVersion]{}, apierrors.NewNotFound(
-		schema.GroupResource{
-			Group:    "kubesphere.io",
-			Resource: "extensionversions",
-		},
-		name+"@"+requested,
-	)
+	if version.Spec.Version != requested {
+		return fmt.Errorf(
+			"ExtensionVersion resource %q reports spec.version %q, want %q",
+			resourceName,
+			version.Spec.Version,
+			requested,
+		)
+	}
+	return nil
 }
 
 func (s *Service) Status(ctx context.Context, name string) (StatusResult, error) {
@@ -193,12 +225,26 @@ func (s *Service) Status(ctx context.Context, name string) (StatusResult, error)
 		if err != nil {
 			return StatusResult{}, err
 		}
+		if err := ensurePlanIdentity(name, plan.Value); err != nil {
+			return StatusResult{}, err
+		}
 		return StatusResult{Object: &plan}, nil
 	}
 
 	plans, err := s.client.ListInstallPlans(ctx)
 	if err != nil {
 		return StatusResult{}, err
+	}
+	for _, plan := range plans.Items {
+		if err := ensurePlanIdentity(
+			plan.Value.Metadata.Name,
+			plan.Value,
+		); err != nil {
+			return StatusResult{}, fmt.Errorf(
+				"validate listed InstallPlan: %w",
+				err,
+			)
+		}
 	}
 	sort.SliceStable(plans.Items, func(i, j int) bool {
 		return plans.Items[i].Value.Metadata.Name <

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -106,6 +107,48 @@ func TestServiceCheckDependenciesUsesStatusVersionBeforeSpecVersion(t *testing.T
 	}
 	if checks[0].ObservedVersion != "1.3.0" {
 		t.Fatalf("observed version = %q", checks[0].ObservedVersion)
+	}
+}
+
+func TestServiceCheckDependenciesRejectsMismatchedInstallPlanIdentity(t *testing.T) {
+	for _, required := range []bool{false, true} {
+		t.Run(map[bool]string{false: "optional", true: "required"}[required], func(t *testing.T) {
+			client := newFakeAPIClient(t)
+			plan := planForTest("logging", "1.4.2", "Installed")
+			plan.Spec.Extension.Name = "other"
+			client.planObjects["logging"] = objectForTest(t, plan)
+
+			checks, err := NewService(client).CheckDependencies(
+				context.Background(),
+				dependencyVersion(ExternalDependency{
+					Name:     "logging",
+					Version:  "^1.2.0",
+					Required: required,
+				}),
+			)
+			if len(checks) != 1 ||
+				checks[0].Code != DependencyUnavailable ||
+				checks[0].Cause == nil ||
+				!strings.Contains(
+					checks[0].Cause.Error(),
+					`references extension "other"`,
+				) {
+				t.Fatalf("checks = %#v", checks)
+			}
+			if required && err == nil {
+				t.Fatal("CheckDependencies() error = nil")
+			}
+			if required &&
+				!strings.Contains(err.Error(), `references extension "other"`) {
+				t.Fatalf(
+					"CheckDependencies() error = %v, want underlying cause",
+					err,
+				)
+			}
+			if !required && err != nil {
+				t.Fatalf("CheckDependencies() error = %v", err)
+			}
+		})
 	}
 }
 

@@ -17,9 +17,31 @@ func TestNormalizeYAMLValidatesSingleNonEmptyDocument(t *testing.T) {
 		wantErr string
 	}{
 		{name: "valid", value: "key: value\r\n\r\n", want: "key: value\n"},
+		{
+			name:  "admission whitespace",
+			value: "key: value \t\r\nnested: value\u00a0\n\n",
+			want:  "key: value\nnested: value\n",
+		},
+		{
+			name:  "document marker in block scalar",
+			value: "script: |\n  echo ---   \n",
+			want:  "script: |\n  echo ---\n",
+		},
+		{name: "empty mapping", value: "{}\n", want: "{}\n"},
 		{name: "empty", value: " \r\n", wantErr: "non-empty"},
+		{name: "empty document marker", value: "---\n", wantErr: "non-empty"},
+		{
+			name:    "empty document with comment",
+			value:   "---\n# comment",
+			wantErr: "non-empty",
+		},
+		{name: "scalar", value: "value\n", wantErr: "mapping"},
+		{name: "sequence", value: "- value\n", wantErr: "mapping"},
+		{name: "explicit null", value: "null\n", wantErr: "mapping"},
+		{name: "duplicate key", value: "key: one\nkey: two\n", wantErr: "invalid"},
 		{name: "malformed", value: "key: [", wantErr: "invalid"},
 		{name: "multiple", value: "key: one\n---\nkey: two\n", wantErr: "one YAML document"},
+		{name: "trailing empty document", value: "key: one\n---\n", wantErr: "one YAML document"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := NormalizeYAML("global configuration", test.value)
@@ -42,6 +64,23 @@ func TestNormalizeYAMLValidatesSingleNonEmptyDocument(t *testing.T) {
 	}
 }
 
+func TestConfigurationInputsRequireTopLevelYAMLMapping(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "Installed")
+	if _, _, err := BuildSpecPatch(current, "HostOnly", PlanChanges{
+		Config: StringChange{Mode: Replace, Value: "scalar"},
+	}); err == nil || !strings.Contains(err.Error(), "mapping") {
+		t.Fatalf("global configuration error = %v, want mapping", err)
+	}
+
+	if _, err := BuildInstallScheduling(
+		"Multicluster",
+		[]string{"member-a"},
+		map[string]string{"member-a": "- sequence"},
+	); err == nil || !strings.Contains(err.Error(), "mapping") {
+		t.Fatalf("override error = %v, want mapping", err)
+	}
+}
+
 func TestNormalizeClustersDeduplicatesWithoutReordering(t *testing.T) {
 	got, err := NormalizeClusters([]string{"member-b", "member-a", "member-b"})
 	if err != nil {
@@ -53,6 +92,20 @@ func TestNormalizeClustersDeduplicatesWithoutReordering(t *testing.T) {
 
 	if _, err := NormalizeClusters([]string{"team/member"}); err == nil {
 		t.Fatal("NormalizeClusters() error = nil, want invalid path segment")
+	}
+	for _, invalid := range []string{
+		"BadName",
+		"bad:name",
+		strings.Repeat("a", 254),
+	} {
+		if _, err := NormalizeClusters([]string{invalid}); err == nil ||
+			!strings.Contains(err.Error(), "DNS-1123") {
+			t.Fatalf(
+				"NormalizeClusters(%q) error = %v, want DNS-1123",
+				invalid,
+				err,
+			)
+		}
 	}
 }
 
@@ -107,6 +160,61 @@ func TestBuildSpecPatchPreservesOmittedFields(t *testing.T) {
 	}
 }
 
+func TestBuildSpecPatchValidatesPreservedConfiguration(t *testing.T) {
+	t.Run("global", func(t *testing.T) {
+		current := planForTest("demo", "1.0.0", "Installed")
+		current.Spec.Config = "key: one\nkey: two\n"
+
+		_, _, err := BuildSpecPatch(current, "HostOnly", PlanChanges{})
+		if err == nil ||
+			!strings.Contains(err.Error(), "global configuration") ||
+			!strings.Contains(err.Error(), "mapping key") {
+			t.Fatalf("BuildSpecPatch() error = %v, want duplicate global key", err)
+		}
+	})
+
+	t.Run("override", func(t *testing.T) {
+		current := planForTest("demo", "1.0.0", "Installed")
+		current.Spec.ClusterScheduling = &ClusterScheduling{
+			Placement: &Placement{Clusters: []string{"member-a"}},
+			Overrides: map[string]string{
+				"member-a": "key: one\nkey: two\n",
+			},
+		}
+
+		_, _, err := BuildSpecPatch(current, "Multicluster", PlanChanges{})
+		if err == nil ||
+			!strings.Contains(err.Error(), `override for cluster "member-a"`) ||
+			!strings.Contains(err.Error(), "mapping key") {
+			t.Fatalf("BuildSpecPatch() error = %v, want duplicate override key", err)
+		}
+	})
+}
+
+func TestBuildSpecPatchDoesNotNormalizePreservedConfiguration(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "Installed")
+	current.Spec.Config = "key: value \t\r\n\r\n"
+	current.Spec.ClusterScheduling = &ClusterScheduling{
+		Placement: &Placement{Clusters: []string{"member-a"}},
+		Overrides: map[string]string{
+			"member-a": "other: value \t\r\n\r\n",
+		},
+	}
+
+	patch, summary, err := BuildSpecPatch(current, "Multicluster", PlanChanges{})
+	if err != nil {
+		t.Fatalf("BuildSpecPatch() error = %v", err)
+	}
+	if summary.Changed() ||
+		summary.ResultConfig != current.Spec.Config ||
+		!reflect.DeepEqual(summary.ResultScheduling, current.Spec.ClusterScheduling) {
+		t.Fatalf("summary = %#v, want preserved result", summary)
+	}
+	if want := map[string]any{"upgradeStrategy": "Manual"}; !reflect.DeepEqual(patch, want) {
+		t.Fatalf("patch = %#v, want %#v", patch, want)
+	}
+}
+
 func TestBuildSpecPatchReplacesAndClearsConfig(t *testing.T) {
 	current := planForTest("demo", "1.0.0", "Installed")
 	current.Spec.Config = "old: value\n"
@@ -130,6 +238,24 @@ func TestBuildSpecPatchReplacesAndClearsConfig(t *testing.T) {
 	value, found := cleared["config"]
 	if !found || value != nil || !summary.ConfigChanged {
 		t.Fatalf("clear patch = %#v, summary = %#v", cleared, summary)
+	}
+}
+
+func TestBuildSpecPatchNormalizesBeforeComparingConfig(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "InstallFailed")
+	current.Spec.Config = "key: value\n"
+
+	patch, summary, err := BuildSpecPatch(current, "HostOnly", PlanChanges{
+		Config: StringChange{Mode: Replace, Value: "key: value \t\r\n"},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpecPatch() error = %v", err)
+	}
+	if summary.Changed() {
+		t.Fatalf("summary = %#v, want unchanged", summary)
+	}
+	if want := map[string]any{"upgradeStrategy": "Manual"}; !reflect.DeepEqual(patch, want) {
+		t.Fatalf("patch = %#v, want %#v", patch, want)
 	}
 }
 
@@ -209,6 +335,29 @@ func TestBuildSpecPatchSetsAndRemovesIndividualOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildSpecPatchNormalizesBeforeComparingOverrides(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "InstallFailed")
+	current.Spec.ClusterScheduling = &ClusterScheduling{
+		Placement: &Placement{Clusters: []string{"member-a"}},
+		Overrides: map[string]string{"member-a": "key: value\n"},
+	}
+
+	patch, summary, err := BuildSpecPatch(current, "Multicluster", PlanChanges{
+		Scheduling: SchedulingChange{
+			SetOverrides: map[string]string{"member-a": "key: value \u00a0\n"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpecPatch() error = %v", err)
+	}
+	if summary.Changed() {
+		t.Fatalf("summary = %#v, want unchanged", summary)
+	}
+	if want := map[string]any{"upgradeStrategy": "Manual"}; !reflect.DeepEqual(patch, want) {
+		t.Fatalf("patch = %#v, want %#v", patch, want)
+	}
+}
+
 func TestBuildSpecPatchRequiresExplicitClustersBeforeSettingSelectorOverride(t *testing.T) {
 	current := planForTest("demo", "1.0.0", "Installed")
 	current.Spec.ClusterScheduling = &ClusterScheduling{
@@ -240,10 +389,39 @@ func TestBuildSpecPatchRequiresExplicitClustersBeforeSettingSelectorOverride(t *
 	}
 }
 
+func TestBuildSpecPatchAllowsOverrideWithExplicitClustersAndStaleSelector(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "Installed")
+	current.Spec.ClusterScheduling = &ClusterScheduling{
+		Placement: &Placement{
+			Clusters: []string{"member-a"},
+			ClusterSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"tier": "worker"},
+			},
+		},
+	}
+
+	patch, summary, err := BuildSpecPatch(current, "Multicluster", PlanChanges{
+		Scheduling: SchedulingChange{
+			SetOverrides: map[string]string{"member-a": "key: value\n"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpecPatch() error = %v", err)
+	}
+	overrides := patch["clusterScheduling"].(map[string]any)["overrides"].(map[string]any)
+	if overrides["member-a"] != "key: value\n" || !summary.SchedulingChanged {
+		t.Fatalf("patch = %#v, summary = %#v", patch, summary)
+	}
+}
+
 func TestBuildSpecPatchClearsSchedulingAndRejectsHostOnly(t *testing.T) {
 	current := planForTest("demo", "1.0.0", "Installed")
 	current.Spec.ClusterScheduling = &ClusterScheduling{
 		Placement: &Placement{Clusters: []string{"member-a"}},
+		Overrides: map[string]string{
+			"member-a": "key: value\n",
+			"member-b": "key: other\n",
+		},
 	}
 
 	if _, _, err := BuildSpecPatch(current, "HostOnly", PlanChanges{}); err == nil {
@@ -255,9 +433,82 @@ func TestBuildSpecPatchClearsSchedulingAndRejectsHostOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clear HostOnly scheduling error = %v", err)
 	}
-	if value, found := patch["clusterScheduling"]; !found || value != nil ||
-		!summary.SchedulingChanged || summary.ResultScheduling != nil {
+	wantSchedulingPatch := map[string]any{
+		"placement": map[string]any{
+			"clusters":        []string{},
+			"clusterSelector": nil,
+		},
+		"overrides": map[string]any{
+			"member-a": nil,
+			"member-b": nil,
+		},
+	}
+	if !reflect.DeepEqual(patch["clusterScheduling"], wantSchedulingPatch) ||
+		!summary.SchedulingChanged ||
+		summary.ResultScheduling == nil ||
+		summary.ResultScheduling.Placement == nil ||
+		len(summary.ResultScheduling.Placement.Clusters) != 0 ||
+		summary.ResultScheduling.Placement.ClusterSelector != nil ||
+		len(summary.ResultScheduling.Overrides) != 0 {
 		t.Fatalf("patch = %#v, summary = %#v", patch, summary)
+	}
+}
+
+func TestBuildSpecPatchClearSchedulingIsNoOpWhenAlreadyExplicitlyEmpty(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "Installed")
+	current.Spec.ClusterScheduling = &ClusterScheduling{
+		Placement: &Placement{Clusters: []string{}},
+	}
+
+	patch, summary, err := BuildSpecPatch(current, "HostOnly", PlanChanges{
+		Scheduling: SchedulingChange{Mode: Clear},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpecPatch() error = %v", err)
+	}
+	if summary.Changed() {
+		t.Fatalf("summary = %#v, want unchanged", summary)
+	}
+	if want := map[string]any{"upgradeStrategy": "Manual"}; !reflect.DeepEqual(patch, want) {
+		t.Fatalf("patch = %#v, want %#v", patch, want)
+	}
+}
+
+func TestBuildSpecPatchClearSchedulingRepairsNilScheduling(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "Installed")
+
+	patch, summary, err := BuildSpecPatch(current, "HostOnly", PlanChanges{
+		Scheduling: SchedulingChange{Mode: Clear},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpecPatch() error = %v", err)
+	}
+	wantSchedulingPatch := map[string]any{
+		"placement": map[string]any{
+			"clusters":        []string{},
+			"clusterSelector": nil,
+		},
+	}
+	if !reflect.DeepEqual(patch["clusterScheduling"], wantSchedulingPatch) ||
+		!summary.SchedulingChanged ||
+		summary.ResultScheduling == nil ||
+		summary.ResultScheduling.Placement == nil {
+		t.Fatalf("patch = %#v, summary = %#v", patch, summary)
+	}
+}
+
+func TestBuildSpecPatchRejectsSchedulingWithoutPlacement(t *testing.T) {
+	current := planForTest("demo", "1.0.0", "Installed")
+	current.Spec.ClusterScheduling = &ClusterScheduling{}
+
+	_, _, err := BuildSpecPatch(current, "Multicluster", PlanChanges{})
+	if err == nil ||
+		!strings.Contains(err.Error(), "missing placement") ||
+		!strings.Contains(err.Error(), "--clear-cluster-scheduling") {
+		t.Fatalf(
+			"BuildSpecPatch() error = %v, want actionable missing placement",
+			err,
+		)
 	}
 }
 

@@ -127,6 +127,56 @@ func TestScopeRejectsExplicitClusterAndNamespaceBeforeFactory(t *testing.T) {
 	}
 }
 
+func TestExtensionRejectsUnsafeVerbosityBeforeFactory(t *testing.T) {
+	called := false
+	root := scopeTestRoot(t, func() (Service, error) {
+		called = true
+		return &fakeService{}, nil
+	})
+	root.PersistentFlags().Int("v", 0, "")
+	root.SetArgs([]string{"--v=8", "extension", "list"})
+
+	err := root.Execute()
+	if err == nil ||
+		!strings.Contains(err.Error(), "--v=7 or lower") ||
+		!strings.Contains(err.Error(), "expose extension configuration") {
+		t.Fatalf("Execute() error = %v, want safe verbosity rejection", err)
+	}
+	if called {
+		t.Fatal("service factory was called")
+	}
+}
+
+func TestNamedCommandsRejectEmptyNameBeforeFactory(t *testing.T) {
+	for _, args := range [][]string{
+		{"extension", "show", ""},
+		{"extension", "versions", ""},
+		{"extension", "status", ""},
+		{"extension", "install", "", "--version", "1.0.0"},
+		{"extension", "upgrade", "", "--version", "1.1.0"},
+		{"extension", "configure", "", "--clear-config"},
+		{"extension", "uninstall", ""},
+		{"extension", "diagnose", ""},
+	} {
+		t.Run(strings.Join(args[:2], "_"), func(t *testing.T) {
+			called := false
+			root := scopeTestRoot(t, func() (Service, error) {
+				called = true
+				return &fakeService{}, nil
+			})
+			root.SetArgs(args)
+
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), "non-empty") {
+				t.Fatalf("Execute(%q) error = %v", args, err)
+			}
+			if called {
+				t.Fatalf("Execute(%q) called service factory", args)
+			}
+		})
+	}
+}
+
 func scopeTestRoot(t *testing.T, factory ServiceFactory) *cobra.Command {
 	t.Helper()
 	root := &cobra.Command{

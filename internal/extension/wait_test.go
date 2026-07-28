@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func waitStatus(state, version, configHash string) InstallationStatus {
@@ -68,14 +69,22 @@ func waitOperation(
 	clusters map[string]waitTarget,
 	removed ...string,
 ) Operation {
-	removedClusters := make(map[string]struct{}, len(removed))
+	removedClusters := make(map[string]removedWaitTarget, len(removed))
 	for _, cluster := range removed {
-		removedClusters[cluster] = struct{}{}
+		status, found := baseline.Value.Status.ClusterSchedulingStatuses[cluster]
+		if found {
+			removedClusters[cluster] = removedWaitTarget{
+				Baseline: statusFingerprint(status),
+			}
+		}
 	}
 	return Operation{
-		Kind:     kind,
-		Name:     baseline.Value.Metadata.Name,
-		Baseline: baseline,
+		Kind:         kind,
+		Name:         baseline.Value.Metadata.Name,
+		Baseline:     baseline,
+		acceptedUID:  baseline.Value.Metadata.UID,
+		acceptedSpec: cloneInstallPlanSpec(baseline.Value.Spec),
+		hasAccepted:  kind != OperationUninstall,
 		expectation: waitExpectation{
 			Host:            host,
 			Clusters:        clusters,
@@ -229,13 +238,58 @@ func TestServiceWaitReturnsAdvancedLifecycleFailure(t *testing.T) {
 	}
 }
 
+func TestEvaluateOperationWaitsWhileAdvancedFailureWillRetry(t *testing.T) {
+	baselineStatus := waitStatus("UpgradeFailed", "1.2.0", "old")
+	baseline := waitPlan(t, "demo", baselineStatus, nil)
+	target := targetFromBaseline(
+		baselineStatus,
+		"1.2.1",
+		"expected",
+	)
+	operation := waitOperation(
+		OperationUpgrade,
+		baseline,
+		target,
+		nil,
+	)
+	advanced := map[string]bool{}
+
+	retryable := baseline.Value
+	retryable.Status.Conditions = []Condition{{
+		Type:    "Ready",
+		Reason:  "OldFailureUpdated",
+		Message: "old attempt metadata was reconciled",
+	}}
+	done, err := evaluateOperation(operation, retryable, advanced)
+	if done || err != nil {
+		t.Fatalf(
+			"retryable evaluateOperation() = (%t, %v), want continue",
+			done,
+			err,
+		)
+	}
+
+	terminal := retryable
+	terminal.Status.Version = "1.2.1"
+	terminal.Status.ConfigHash = "expected"
+	done, err = evaluateOperation(operation, terminal, advanced)
+	var lifecycleErr *LifecycleFailureError
+	if done || !errors.As(err, &lifecycleErr) {
+		t.Fatalf(
+			"terminal evaluateOperation() = (%t, %v), want failure",
+			done,
+			err,
+		)
+	}
+}
+
 func TestServiceWaitConfigureRequiresConfigHashChange(t *testing.T) {
 	old := waitStatus("Installed", "1.2.1", "old")
 	baseline := waitPlan(t, "demo", old, nil)
 	operation := waitOperation(
 		OperationConfigure,
 		baseline,
-		targetFromBaseline(old, "1.2.1", "old"),
+		targetFromBaseline(old, "1.2.1", "expected"),
 		nil,
 	)
 
@@ -258,12 +312,40 @@ func TestServiceWaitConfigureRequiresConfigHashChange(t *testing.T) {
 		}
 	})
 
-	t.Run("changed succeeds", func(t *testing.T) {
+	t.Run("different but unexpected hash times out", func(t *testing.T) {
+		client := newFakeAPIClient(t)
+		queuePlanObjects(
+			client,
+			"demo",
+			waitPlan(
+				t,
+				"demo",
+				waitStatus("Installed", "1.2.1", "unexpected"),
+				nil,
+			),
+		)
+		expired, cancel := context.WithDeadline(
+			context.Background(),
+			time.Now().Add(-time.Second),
+		)
+		defer cancel()
+
+		_, err := pollingService(client, pollingTicks(0)).Wait(
+			expired,
+			operation,
+			PollOptions{Timeout: time.Minute},
+		)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Wait() error = %v, want DeadlineExceeded", err)
+		}
+	})
+
+	t.Run("expected hash succeeds", func(t *testing.T) {
 		client := newFakeAPIClient(t)
 		changed := waitPlan(
 			t,
 			"demo",
-			waitStatus("Installed", "1.2.1", "new"),
+			waitStatus("Installed", "1.2.1", "expected"),
 			nil,
 		)
 		queuePlanObjects(client, "demo", changed)
@@ -271,12 +353,197 @@ func TestServiceWaitConfigureRequiresConfigHashChange(t *testing.T) {
 		_, err := pollingService(client, pollingTicks(0)).Wait(
 			context.Background(),
 			operation,
-			PollOptions{Timeout: time.Minute},
+			PollOptions{Timeout: 20 * time.Millisecond},
 		)
 		if err != nil {
 			t.Fatalf("Wait() error = %v", err)
 		}
 	})
+}
+
+func TestEvaluateOperationReportsFailureBeforePendingTarget(t *testing.T) {
+	host := waitStatus("Preparing", "", "")
+	clusterOld := waitStatus("Installed", "1.2.0", "old")
+	baseline := waitPlan(t, "demo", host, map[string]InstallationStatus{
+		"member-b": clusterOld,
+		"member-a": clusterOld,
+	})
+	failedPlan := baseline.Value
+	failedPlan.Status.ClusterSchedulingStatuses = map[string]InstallationStatus{
+		"member-b": waitStatus("UpgradeFailed", "1.2.1", "new-b"),
+		"member-a": waitStatus("UpgradeFailed", "1.2.1", "new-a"),
+	}
+
+	done, err := evaluateOperation(
+		waitOperation(
+			OperationUpgrade,
+			baseline,
+			targetFromBaseline(host, "1.2.1", ""),
+			map[string]waitTarget{
+				"member-b": *targetFromBaseline(clusterOld, "1.2.1", ""),
+				"member-a": *targetFromBaseline(clusterOld, "1.2.1", ""),
+			},
+		),
+		failedPlan,
+		map[string]bool{},
+	)
+	if done {
+		t.Fatal("evaluateOperation() done = true")
+	}
+	if err == nil || !strings.Contains(err.Error(), "cluster/member-a") {
+		t.Fatalf("evaluateOperation() error = %v, want deterministic member-a failure", err)
+	}
+}
+
+func TestServiceWaitRemovedClusterFailureUsesAcceptedBaseline(t *testing.T) {
+	host := waitStatus("Installed", "1.2.1", "host")
+
+	t.Run("unchanged stale failure is ignored", func(t *testing.T) {
+		stale := waitStatus("InstallFailed", "1.2.1", "old")
+		baseline := waitPlan(t, "demo", host, map[string]InstallationStatus{
+			"member-b": stale,
+		})
+		client := newFakeAPIClient(t)
+		queuePlanObjects(client, "demo", baseline)
+		expired, cancel := context.WithDeadline(
+			context.Background(),
+			time.Now().Add(-time.Second),
+		)
+		defer cancel()
+
+		_, err := pollingService(client, pollingTicks(0)).Wait(
+			expired,
+			waitOperation(
+				OperationConfigure,
+				baseline,
+				nil,
+				nil,
+				"member-b",
+			),
+			PollOptions{Timeout: time.Minute},
+		)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Wait() error = %v, want DeadlineExceeded", err)
+		}
+		var lifecycleErr *LifecycleFailureError
+		if errors.As(err, &lifecycleErr) {
+			t.Fatalf("Wait() returned stale lifecycle failure: %v", err)
+		}
+	})
+
+	t.Run("advanced failure is immediate", func(t *testing.T) {
+		old := waitStatus("Installed", "1.2.1", "old")
+		baseline := waitPlan(t, "demo", host, map[string]InstallationStatus{
+			"member-b": old,
+		})
+		failedStatus := waitStatus("UninstallFailed", "1.2.1", "old")
+		failed := waitPlan(t, "demo", host, map[string]InstallationStatus{
+			"member-b": failedStatus,
+		})
+		client := newFakeAPIClient(t)
+		queuePlanObjects(client, "demo", failed)
+
+		_, err := pollingService(client, pollingTicks(0)).Wait(
+			context.Background(),
+			waitOperation(
+				OperationConfigure,
+				baseline,
+				nil,
+				nil,
+				"member-b",
+			),
+			PollOptions{Timeout: 20 * time.Millisecond},
+		)
+		var lifecycleErr *LifecycleFailureError
+		if !errors.As(err, &lifecycleErr) ||
+			!strings.Contains(err.Error(), "cluster/member-b") {
+			t.Fatalf("Wait() error = %v, want removed-cluster failure", err)
+		}
+	})
+}
+
+func TestEvaluateRemovedClusterUsesUninstallFailureSemantics(t *testing.T) {
+	host := waitStatus("Installed", "1.2.1", "host")
+
+	t.Run("baseline uninstall failure is terminal", func(t *testing.T) {
+		failed := waitStatus("UninstallFailed", "1.2.1", "old")
+		baseline := waitPlan(t, "demo", host, map[string]InstallationStatus{
+			"member-b": failed,
+		})
+		done, err := evaluateOperation(
+			waitOperation(
+				OperationConfigure,
+				baseline,
+				nil,
+				nil,
+				"member-b",
+			),
+			baseline.Value,
+			map[string]bool{},
+		)
+		var lifecycleErr *LifecycleFailureError
+		if done || !errors.As(err, &lifecycleErr) ||
+			!strings.Contains(err.Error(), "cluster/member-b") {
+			t.Fatalf("evaluateOperation() = (%t, %v)", done, err)
+		}
+	})
+
+	t.Run("retained uninstall failure is terminal", func(t *testing.T) {
+		failed := waitStatus("UninstallFailed", "1.2.1", "old")
+		baseline := waitPlan(t, "demo", host, map[string]InstallationStatus{
+			"member-b": failed,
+		})
+		done, err := evaluateOperation(
+			waitOperation(
+				OperationUpgrade,
+				baseline,
+				nil,
+				map[string]waitTarget{
+					"member-b": *targetFromBaseline(
+						failed,
+						"1.2.1",
+						"",
+					),
+				},
+			),
+			baseline.Value,
+			map[string]bool{},
+		)
+		var lifecycleErr *LifecycleFailureError
+		if done || !errors.As(err, &lifecycleErr) ||
+			!strings.Contains(err.Error(), "cluster/member-b") {
+			t.Fatalf("evaluateOperation() = (%t, %v)", done, err)
+		}
+	})
+
+	for _, state := range []string{"InstallFailed", "UpgradeFailed"} {
+		t.Run("advanced "+state+" still proceeds to uninstall", func(t *testing.T) {
+			old := waitStatus("Installed", "1.2.1", "old")
+			baseline := waitPlan(t, "demo", host, map[string]InstallationStatus{
+				"member-b": old,
+			})
+			operation := waitOperation(
+				OperationConfigure,
+				baseline,
+				nil,
+				nil,
+				"member-b",
+			)
+			changed := baseline.Value
+			failed := waitStatus(state, "1.2.1", "new")
+			changed.Status.ClusterSchedulingStatuses = map[string]InstallationStatus{
+				"member-b": failed,
+			}
+			done, err := evaluateOperation(
+				operation,
+				changed,
+				map[string]bool{},
+			)
+			if done || err != nil {
+				t.Fatalf("evaluateOperation() = (%t, %v)", done, err)
+			}
+		})
+	}
 }
 
 func TestServiceWaitTracksClusterChangesAndRemoval(t *testing.T) {
@@ -508,6 +775,100 @@ func TestServiceWaitRejectsNonPositiveTimeout(t *testing.T) {
 	}
 	if len(client.calls) != 0 {
 		t.Fatalf("calls = %v", client.calls)
+	}
+}
+
+func TestEvaluateOperationRejectsSupersededAcceptedPlan(t *testing.T) {
+	hash := controllerConfigHash([]byte("feature: true\n"))
+	status := waitStatus("Installed", "1.2.1", hash)
+	baseline := waitPlan(t, "demo", status, nil)
+	baseline.Value.Metadata.UID = "uid-a"
+	baseline.Value.Spec.Config = "feature: true\n"
+	operation := waitOperation(
+		OperationUpgrade,
+		baseline,
+		&waitTarget{
+			Baseline:   statusFingerprint(status),
+			Version:    "1.2.1",
+			ConfigHash: hash,
+		},
+		map[string]waitTarget{},
+	)
+
+	tests := []struct {
+		name   string
+		mutate func(*InstallPlan)
+	}{
+		{
+			name: "accepted spec was replaced",
+			mutate: func(plan *InstallPlan) {
+				plan.Spec.Extension.Version = "1.2.2"
+			},
+		},
+		{
+			name: "accepted plan is being deleted",
+			mutate: func(plan *InstallPlan) {
+				now := metav1.Now()
+				plan.Metadata.DeletionTimestamp = &now
+			},
+		},
+		{
+			name: "accepted plan was recreated",
+			mutate: func(plan *InstallPlan) {
+				plan.Metadata.UID = "uid-b"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			live := baseline.Value
+			test.mutate(&live)
+			done, err := evaluateOperation(
+				operation,
+				live,
+				map[string]bool{},
+			)
+			if done {
+				t.Fatal("evaluateOperation() done = true")
+			}
+			if err == nil || !strings.Contains(err.Error(), "superseded") {
+				t.Fatalf(
+					"evaluateOperation() error = %v, want superseded",
+					err,
+				)
+			}
+		})
+	}
+}
+
+func TestEvaluateUninstallRejectsRecreatedPlan(t *testing.T) {
+	baseline := waitPlan(
+		t,
+		"demo",
+		waitStatus("Uninstalling", "1.2.1", ""),
+		nil,
+	)
+	baseline.Value.Metadata.UID = "uid-a"
+	operation := waitOperation(
+		OperationUninstall,
+		baseline,
+		nil,
+		map[string]waitTarget{},
+	)
+	recreated := baseline.Value
+	recreated.Metadata.UID = "uid-b"
+	recreated.Status.State = "Installed"
+
+	done, err := evaluateOperation(
+		operation,
+		recreated,
+		map[string]bool{},
+	)
+	if done {
+		t.Fatal("evaluateOperation() done = true")
+	}
+	if err == nil || !strings.Contains(err.Error(), "superseded") {
+		t.Fatalf("evaluateOperation() error = %v, want superseded", err)
 	}
 }
 

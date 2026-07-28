@@ -75,7 +75,7 @@ func (s *Service) Diagnose(
 		return diagnosis, err
 	}
 	if options.TargetCluster != "" {
-		if err := validatePathName("cluster", options.TargetCluster); err != nil {
+		if err := validateClusterName(options.TargetCluster); err != nil {
 			return diagnosis, err
 		}
 	}
@@ -116,6 +116,10 @@ func (s *Service) Diagnose(
 		)
 	}
 	plan := planObject.Value
+	if err := ensurePlanIdentity(name, plan); err != nil {
+		diagnosis.add("install-plan", DiagnosticError, err.Error())
+		return diagnosis, nil
+	}
 
 	selected := plan.Status.InstallationStatus
 	selectedAvailable := true
@@ -126,68 +130,90 @@ func (s *Service) Diagnose(
 		selected, found = plan.Status.ClusterSchedulingStatuses[options.TargetCluster]
 		selectedAvailable = found
 	}
-	statusForPlan := selected
 	if !selectedAvailable {
-		statusForPlan = plan.Status.InstallationStatus
+		message := fmt.Sprintf(
+			"scope=%s; no status was found",
+			selectedScope,
+		)
+		if plan.Metadata.DeletionTimestamp != nil {
+			message += "; InstallPlan is deleting"
+		}
+		diagnosis.add(
+			"install-plan",
+			DiagnosticError,
+			message,
+		)
+	} else {
+		status := diagnosticState(selected.State)
+		message := installPlanDiagnosticMessage(selectedScope, selected)
+		if plan.Metadata.DeletionTimestamp != nil {
+			status = DiagnosticError
+			message += "; InstallPlan is deleting"
+		}
+		diagnosis.add(
+			"install-plan",
+			status,
+			message,
+		)
 	}
-	diagnosis.add(
-		"install-plan",
-		diagnosticState(statusForPlan.State),
-		installPlanDiagnosticMessage(selectedScope, statusForPlan),
-	)
 
 	var selectedVersion *Object[ExtensionVersion]
-	if !selectedAvailable {
+	targetVersion := plan.Spec.Extension.Version
+	if strings.TrimSpace(targetVersion) == "" {
 		diagnosis.add(
 			"version",
 			DiagnosticError,
-			fmt.Sprintf(
-				"cannot determine installed version because %s has no status",
-				selectedScope,
-			),
+			"controller target version is not specified",
 		)
 	} else {
-		installedVersion := selected.Version
-		if installedVersion == "" && successfulState(selected.State) {
-			installedVersion = plan.Spec.Extension.Version
+		resourceName := name + "-" + targetVersion
+		version, getErr := s.client.GetExtensionVersion(
+			ctx,
+			resourceName,
+		)
+		if getErr != nil && !apierrors.IsNotFound(getErr) {
+			return diagnosis, fmt.Errorf(
+				"diagnose extension %q ExtensionVersion %q: %w",
+				name,
+				resourceName,
+				getErr,
+			)
 		}
-		if installedVersion == "" {
+		identityErr := error(nil)
+		if getErr == nil {
+			identityErr = ensureControllerVersionIdentity(
+				name,
+				targetVersion,
+				version.Value,
+			)
+		}
+		switch {
+		case apierrors.IsNotFound(getErr):
 			diagnosis.add(
 				"version",
 				DiagnosticError,
-				"installed exact version is not reported",
+				fmt.Sprintf(
+					"controller target ExtensionVersion resource %q was not found",
+					resourceName,
+				),
 			)
-		} else {
-			versions, listErr := s.client.ListExtensionVersions(ctx, name)
-			if listErr != nil {
-				return diagnosis, fmt.Errorf(
-					"diagnose extension %q versions: %w",
-					name,
-					listErr,
-				)
-			}
-			version, found := findVersionForDiagnosis(versions, installedVersion)
-			if !found {
-				diagnosis.add(
-					"version",
-					DiagnosticError,
-					fmt.Sprintf(
-						"installed ExtensionVersion %q was not found",
-						installedVersion,
-					),
-				)
-			} else {
-				copy := version
-				selectedVersion = &copy
-				diagnosis.add(
-					"version",
-					DiagnosticOK,
-					fmt.Sprintf(
-						"exact ExtensionVersion %q is available",
-						installedVersion,
-					),
-				)
-			}
+		case identityErr != nil:
+			diagnosis.add(
+				"version",
+				DiagnosticError,
+				identityErr.Error(),
+			)
+		default:
+			copy := version
+			selectedVersion = &copy
+			diagnosis.add(
+				"version",
+				DiagnosticOK,
+				fmt.Sprintf(
+					"controller target ExtensionVersion %q is available",
+					targetVersion,
+				),
+			)
 		}
 	}
 
@@ -277,18 +303,6 @@ func conditionMessages(conditions []Condition) []string {
 	return messages
 }
 
-func findVersionForDiagnosis(
-	versions List[ExtensionVersion],
-	exact string,
-) (Object[ExtensionVersion], bool) {
-	for _, version := range versions.Items {
-		if version.Value.Spec.Version == exact {
-			return version, true
-		}
-	}
-	return Object[ExtensionVersion]{}, false
-}
-
 func dependencyDiagnosticStatus(check DependencyCheck) DiagnosticStatus {
 	if check.Code == DependencySatisfied {
 		return DiagnosticOK
@@ -308,7 +322,7 @@ func dependencyDiagnosticMessage(check DependencyCheck) string {
 	if check.Dependency.Required {
 		requirement = "required"
 	}
-	return fmt.Sprintf(
+	message := fmt.Sprintf(
 		"%s dependency type=%s constraint=%s result=%s state=%s version=%s",
 		requirement,
 		valueOrDefault(check.Dependency.Type, "extension"),
@@ -317,6 +331,10 @@ func dependencyDiagnosticMessage(check DependencyCheck) string {
 		valueOrNone(check.ObservedState),
 		valueOrNone(check.ObservedVersion),
 	)
+	if check.Cause != nil {
+		message += " cause=" + check.Cause.Error()
+	}
+	return message
 }
 
 func valueOrDefault(value, fallback string) string {
@@ -437,10 +455,11 @@ func (s *Service) diagnoseWorkload(
 		return pods.Items[i].Name < pods.Items[j].Name
 	})
 	for _, pod := range pods.Items {
-		severity, podMessage := podDiagnostic(
+		severity, podMessage := podDiagnosticForJob(
 			pod,
 			status.TargetNamespace,
 			status.JobName,
+			jobIsComplete(jobValue),
 		)
 		diagnosis.add("pod/"+pod.Name, severity, podMessage)
 	}
@@ -470,6 +489,9 @@ func jobDiagnostic(
 		job.Status.Succeeded,
 		job.Status.Failed,
 	)
+	if jobIsComplete(job) {
+		return DiagnosticOK, base + "; complete"
+	}
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed &&
 			condition.Status == corev1.ConditionTrue {
@@ -488,14 +510,10 @@ func jobDiagnostic(
 		}
 	}
 	if job.Status.Failed != 0 {
-		return DiagnosticError, base + "; " +
-			kubectlLogsSuggestion(namespace, name)
-	}
-	for _, condition := range job.Status.Conditions {
-		if condition.Type == batchv1.JobComplete &&
-			condition.Status == corev1.ConditionTrue {
-			return DiagnosticOK, base + "; complete"
+		if job.Status.Active != 0 {
+			return DiagnosticWarn, base + "; retrying after failed attempt"
 		}
+		return DiagnosticWarn, base + "; failed attempts recorded; waiting for terminal condition"
 	}
 	if job.Status.Active != 0 {
 		return DiagnosticInfo, base + "; active"
@@ -503,15 +521,35 @@ func jobDiagnostic(
 	return DiagnosticInfo, base + "; waiting"
 }
 
+func jobIsComplete(job Job) bool {
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobComplete &&
+			condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
 func podDiagnostic(
 	pod corev1.Pod,
 	namespace string,
 	jobName string,
 ) (DiagnosticStatus, string) {
-	terminations, failedTermination := podTerminations(pod)
+	return podDiagnosticForJob(pod, namespace, jobName, false)
+}
+
+func podDiagnosticForJob(
+	pod corev1.Pod,
+	namespace string,
+	jobName string,
+	completedJob bool,
+) (DiagnosticStatus, string) {
+	containerStates, currentFailure, historicalFailure :=
+		podContainerStates(pod)
 	parts := []string{"phase=" + string(pod.Status.Phase)}
-	if len(terminations) != 0 {
-		parts = append(parts, strings.Join(terminations, ", "))
+	if len(containerStates) != 0 {
+		parts = append(parts, strings.Join(containerStates, ", "))
 	}
 
 	severity := DiagnosticWarn
@@ -523,8 +561,20 @@ func podDiagnostic(
 	case corev1.PodFailed:
 		severity = DiagnosticError
 	}
-	if failedTermination {
+	if currentFailure {
 		severity = DiagnosticError
+	}
+	if historicalFailure && severity != DiagnosticError {
+		severity = DiagnosticWarn
+	}
+	if completedJob &&
+		pod.Status.Phase == corev1.PodFailed &&
+		severity == DiagnosticError {
+		severity = DiagnosticWarn
+		parts = append(
+			parts,
+			"historical failed attempt; Job later completed",
+		)
 	}
 	if severity == DiagnosticError {
 		parts = append(parts, kubectlLogsSuggestion(namespace, jobName))
@@ -532,47 +582,89 @@ func podDiagnostic(
 	return severity, strings.Join(parts, "; ")
 }
 
-func podTerminations(pod corev1.Pod) ([]string, bool) {
-	type namedTermination struct {
-		name        string
-		termination *corev1.ContainerStateTerminated
+func podContainerStates(pod corev1.Pod) ([]string, bool, bool) {
+	type namedState struct {
+		name       string
+		detail     string
+		failed     bool
+		historical bool
 	}
-	terminations := make([]namedTermination, 0)
-	for _, status := range pod.Status.InitContainerStatuses {
-		if status.State.Terminated != nil {
-			terminations = append(terminations, namedTermination{
-				name:        "init/" + status.Name,
-				termination: status.State.Terminated,
+	states := make([]namedState, 0)
+	add := func(prefix string, status corev1.ContainerStatus) {
+		name := prefix + status.Name
+		if waiting := status.State.Waiting; waiting != nil {
+			reason := valueOrDefault(waiting.Reason, "Waiting")
+			detail := name + "=" + reason
+			if waiting.Message != "" {
+				detail += ": " + waiting.Message
+			}
+			states = append(states, namedState{
+				name:   name,
+				detail: detail,
+				failed: failedContainerWaitingReason(reason),
 			})
 		}
+		if status.State.Terminated != nil {
+			states = append(states, namedState{
+				name:   name,
+				detail: terminationDetail(name, status.State.Terminated),
+				failed: status.State.Terminated.ExitCode != 0,
+			})
+		}
+		if last := status.LastTerminationState.Terminated; last != nil &&
+			last.ExitCode != 0 {
+			lastName := name + "(last)"
+			states = append(states, namedState{
+				name:       lastName,
+				detail:     terminationDetail(lastName, last),
+				historical: true,
+			})
+		}
+	}
+
+	for _, status := range pod.Status.InitContainerStatuses {
+		add("init/", status)
 	}
 	for _, status := range pod.Status.ContainerStatuses {
-		if status.State.Terminated != nil {
-			terminations = append(terminations, namedTermination{
-				name:        status.Name,
-				termination: status.State.Terminated,
-			})
-		}
+		add("", status)
 	}
-	slices.SortFunc(terminations, func(left, right namedTermination) int {
+	slices.SortFunc(states, func(left, right namedState) int {
 		return strings.Compare(left.name, right.name)
 	})
 
-	result := make([]string, 0, len(terminations))
+	result := make([]string, 0, len(states))
 	failed := false
-	for _, item := range terminations {
-		reason := valueOrDefault(item.termination.Reason, "Terminated")
-		result = append(result, fmt.Sprintf(
-			"%s=%s(exit=%d)",
-			item.name,
-			reason,
-			item.termination.ExitCode,
-		))
-		if item.termination.ExitCode != 0 {
-			failed = true
-		}
+	historical := false
+	for _, state := range states {
+		result = append(result, state.detail)
+		failed = failed || state.failed
+		historical = historical || state.historical
 	}
-	return result, failed
+	return result, failed, historical
+}
+
+func failedContainerWaitingReason(reason string) bool {
+	switch reason {
+	case "CrashLoopBackOff",
+		"ImagePullBackOff",
+		"ErrImagePull",
+		"CreateContainerConfigError":
+		return true
+	default:
+		return false
+	}
+}
+
+func terminationDetail(
+	name string,
+	termination *corev1.ContainerStateTerminated,
+) string {
+	return fmt.Sprintf(
+		"%s=%s(exit=%d)",
+		name,
+		valueOrDefault(termination.Reason, "Terminated"),
+		termination.ExitCode,
+	)
 }
 
 func kubectlLogsSuggestion(namespace, jobName string) string {

@@ -11,8 +11,10 @@ import (
 type ObjectMeta struct {
 	Name              string            `json:"name"`
 	Namespace         string            `json:"namespace,omitempty"`
+	UID               string            `json:"uid,omitempty"`
 	ResourceVersion   string            `json:"resourceVersion,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
+	Finalizers        []string          `json:"finalizers,omitempty"`
 	CreationTimestamp metav1.Time       `json:"creationTimestamp,omitempty"`
 	DeletionTimestamp *metav1.Time      `json:"deletionTimestamp,omitempty"`
 }

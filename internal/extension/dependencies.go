@@ -41,14 +41,18 @@ func (e *DependencyValidationError) Error() string {
 	for _, failure := range e.Failures {
 		state := valueOrNone(failure.ObservedState)
 		version := valueOrNone(failure.ObservedVersion)
-		parts = append(parts, fmt.Sprintf(
+		detail := fmt.Sprintf(
 			"%s requires %q: %s (state=%s version=%s)",
 			failure.Dependency.Name,
 			failure.Dependency.Version,
 			failure.Code,
 			state,
 			version,
-		))
+		)
+		if failure.Cause != nil {
+			detail += " cause=" + failure.Cause.Error()
+		}
+		parts = append(parts, detail)
 	}
 	return "required extension dependencies are not satisfied: " +
 		strings.Join(parts, "; ")
@@ -120,6 +124,11 @@ func (s *Service) checkDependency(
 		} else {
 			check.Code = DependencyUnavailable
 		}
+		check.Cause = err
+		return check
+	}
+	if err := ensurePlanIdentity(dependency.Name, plan.Value); err != nil {
+		check.Code = DependencyUnavailable
 		check.Cause = err
 		return check
 	}

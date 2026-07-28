@@ -137,7 +137,7 @@ func newInstallCommand(
 		Use:     "install NAME",
 		Short:   "Install an exact KubeSphere extension version",
 		Example: parent + " extension install NAME --version VERSION",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if strings.TrimSpace(version) == "" {
 				return fmt.Errorf("--version requires a non-empty exact version")
@@ -201,7 +201,7 @@ func newUpgradeCommand(
 		Use:     "upgrade NAME",
 		Short:   "Upgrade to an exact KubeSphere extension version",
 		Example: parent + " extension upgrade NAME --version VERSION",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if strings.TrimSpace(version) == "" {
 				return fmt.Errorf("--version requires a non-empty exact version")
@@ -221,8 +221,9 @@ func newUpgradeCommand(
 				command.Context(),
 				args[0],
 				internalextension.UpgradeOptions{
-					Version: version,
-					Changes: config.planChanges(command, loaded),
+					Version:         version,
+					Changes:         config.planChanges(command, loaded),
+					RequireWaitable: wait.wait,
 				},
 			)
 			if err != nil {
@@ -262,7 +263,7 @@ func newConfigureCommand(
 		Use:     "configure NAME",
 		Short:   "Configure an installed KubeSphere extension",
 		Example: parent + " extension configure NAME --config FILE",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if !config.hasChanges(command) {
 				return fmt.Errorf(
@@ -280,10 +281,12 @@ func newConfigureCommand(
 			if err != nil {
 				return err
 			}
+			changes := config.planChanges(command, loaded)
+			changes.RequireWaitable = wait.wait
 			operation, err := service.Configure(
 				command.Context(),
 				args[0],
-				config.planChanges(command, loaded),
+				changes,
 			)
 			if err != nil {
 				return err
@@ -315,7 +318,7 @@ func newUninstallCommand(
 		Use:     "uninstall NAME",
 		Short:   "Uninstall a KubeSphere extension",
 		Example: parent + " extension uninstall NAME",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := wait.validate(command); err != nil {
 				return err

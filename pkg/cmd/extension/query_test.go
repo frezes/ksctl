@@ -80,7 +80,8 @@ func TestListPassesFlagsAndPrintsTable(t *testing.T) {
 	}); !reflect.DeepEqual(gotOptions, want) {
 		t.Fatalf("options = %#v, want %#v", gotOptions, want)
 	}
-	if got, want := out.String(), "NAME  CATEGORY  RECOMMENDED  INSTALLED  STATE\n"; got != want {
+	if got, want := out.String(),
+		"NAME  CATEGORY  RECOMMENDED  INSTALLED  TARGET  STATE\n"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
@@ -118,6 +119,29 @@ func TestShowPassesOpaqueExactVersion(t *testing.T) {
 	}
 	if gotName != "demo" || gotVersion != "v1.0.0+build" {
 		t.Fatalf("Show(%q, %q)", gotName, gotVersion)
+	}
+}
+
+func TestShowRejectsExplicitEmptyVersionBeforeFactory(t *testing.T) {
+	streams, out, _ := bufferedStreams()
+	called := false
+	err := executeExtensionCommand(
+		t,
+		[]string{"extension", "show", "demo", "--version="},
+		streams,
+		func() (Service, error) {
+			called = true
+			return &fakeService{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "--version") {
+		t.Fatalf("Execute() error = %v, want --version validation", err)
+	}
+	if called {
+		t.Fatal("service factory was called")
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q", out.String())
 	}
 }
 

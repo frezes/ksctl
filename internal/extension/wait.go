@@ -1,16 +1,20 @@
 package extension
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
 
+	yaml3 "gopkg.in/yaml.v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
@@ -74,17 +78,21 @@ func (e *LifecycleFailureError) Error() string {
 }
 
 type waitTarget struct {
-	Baseline                string
-	Version                 string
-	ConfigHash              string
-	MustAdvance             bool
-	requireConfigHashChange bool
+	Baseline    string
+	Version     string
+	ConfigHash  string
+	MustAdvance bool
+}
+
+type removedWaitTarget struct {
+	Baseline string
 }
 
 type waitExpectation struct {
 	Host            *waitTarget
 	Clusters        map[string]waitTarget
-	RemovedClusters map[string]struct{}
+	RemovedClusters map[string]removedWaitTarget
+	SelectorOnly    bool
 }
 
 func statusFingerprint(status InstallationStatus) string {
@@ -115,42 +123,19 @@ func lifecycleFailure(name, scope string, status InstallationStatus) error {
 	}
 }
 
-func versionWaitTarget(status InstallationStatus, version string) waitTarget {
+func baselineWaitTarget(
+	status InstallationStatus,
+	found bool,
+	version string,
+	configHash string,
+) waitTarget {
 	target := waitTarget{
 		Baseline:    statusFingerprint(status),
 		Version:     version,
+		ConfigHash:  configHash,
 		MustAdvance: true,
 	}
-	if successfulState(status.State) && status.Version == version {
-		target.MustAdvance = false
-	}
-	return target
-}
-
-func changedWaitTarget(
-	before InstallationStatus,
-	beforeFound bool,
-	after InstallationStatus,
-	afterFound bool,
-	version string,
-	requireConfigHashChange bool,
-) waitTarget {
-	target := waitTarget{
-		Baseline:    statusFingerprint(after),
-		Version:     version,
-		MustAdvance: true,
-	}
-
-	observed := afterFound &&
-		(!beforeFound || statusFingerprint(before) != statusFingerprint(after))
-	if requireConfigHashChange {
-		observed = afterFound && after.ConfigHash != before.ConfigHash
-		if !observed {
-			target.ConfigHash = after.ConfigHash
-			target.requireConfigHashChange = true
-		}
-	}
-	if observed {
+	if found && targetStatusMatches(status, target) {
 		target.MustAdvance = false
 	}
 	return target
@@ -159,36 +144,73 @@ func changedWaitTarget(
 func installWaitExpectation(
 	baseline InstallPlan,
 	version string,
-	scheduling *ClusterScheduling,
 ) waitExpectation {
-	host := versionWaitTarget(baseline.Status.InstallationStatus, version)
+	host := baselineWaitTarget(
+		baseline.Status.InstallationStatus,
+		true,
+		version,
+		controllerConfigHash([]byte(baseline.Spec.Config)),
+	)
 	expectation := waitExpectation{
 		Host:     &host,
 		Clusters: map[string]waitTarget{},
 	}
+	scheduling := baseline.Spec.ClusterScheduling
 	if scheduling == nil || scheduling.Placement == nil {
 		return expectation
 	}
 	for _, cluster := range scheduling.Placement.Clusters {
-		status := baseline.Status.ClusterSchedulingStatuses[cluster]
-		expectation.Clusters[cluster] = versionWaitTarget(status, version)
+		status, found := baseline.Status.ClusterSchedulingStatuses[cluster]
+		expectation.Clusters[cluster] = baselineWaitTarget(
+			status,
+			found,
+			version,
+			controllerConfigHash(effectiveClusterConfig(
+				baseline.Spec.Config,
+				scheduling,
+				cluster,
+			)),
+		)
 	}
 	return expectation
 }
 
 func upgradeWaitExpectation(
+	before InstallPlan,
 	baseline InstallPlan,
 	version string,
-	scheduling *ClusterScheduling,
+	summary ChangeSummary,
 ) waitExpectation {
-	expectation := installWaitExpectation(baseline, version, scheduling)
-	if scheduling == nil ||
-		scheduling.Placement == nil ||
-		scheduling.Placement.ClusterSelector == nil {
-		return expectation
+	host := baselineWaitTarget(
+		baseline.Status.InstallationStatus,
+		true,
+		version,
+		controllerConfigHash([]byte(summary.ResultConfig)),
+	)
+	expectation := waitExpectation{
+		Host:         &host,
+		Clusters:     map[string]waitTarget{},
+		SelectorOnly: selectorOnlyPlacement(summary.ResultScheduling),
+		RemovedClusters: removedWaitTargets(
+			before,
+			baseline,
+			knownPlacementClusters(summary.ResultScheduling),
+			hasDeterministicPlacement(summary.ResultScheduling),
+		),
 	}
-	for cluster, status := range baseline.Status.ClusterSchedulingStatuses {
-		expectation.Clusters[cluster] = versionWaitTarget(status, version)
+	resultClusters := knownPlacementClusters(summary.ResultScheduling)
+	for _, cluster := range slices.Sorted(maps.Keys(resultClusters)) {
+		status, found := baseline.Status.ClusterSchedulingStatuses[cluster]
+		expectation.Clusters[cluster] = baselineWaitTarget(
+			status,
+			found,
+			version,
+			controllerConfigHash(effectiveClusterConfig(
+				summary.ResultConfig,
+				summary.ResultScheduling,
+				cluster,
+			)),
+		)
 	}
 	return expectation
 }
@@ -197,108 +219,167 @@ func configureWaitExpectation(
 	before InstallPlan,
 	baseline InstallPlan,
 	version string,
-	changes PlanChanges,
 	summary ChangeSummary,
 ) waitExpectation {
+	resultClusters := knownPlacementClusters(summary.ResultScheduling)
 	expectation := waitExpectation{
-		Clusters:        map[string]waitTarget{},
-		RemovedClusters: map[string]struct{}{},
+		Clusters:     map[string]waitTarget{},
+		SelectorOnly: selectorOnlyPlacement(summary.ResultScheduling),
+		RemovedClusters: removedWaitTargets(
+			before,
+			baseline,
+			resultClusters,
+			hasDeterministicPlacement(summary.ResultScheduling),
+		),
 	}
 
-	resultClusters := map[string]struct{}{}
-	if result := summary.ResultScheduling; result != nil && result.Placement != nil {
-		for _, cluster := range result.Placement.Clusters {
-			resultClusters[cluster] = struct{}{}
-		}
-		if result.Placement.ClusterSelector != nil {
-			for cluster := range before.Status.ClusterSchedulingStatuses {
-				resultClusters[cluster] = struct{}{}
-			}
-			for cluster := range baseline.Status.ClusterSchedulingStatuses {
-				resultClusters[cluster] = struct{}{}
-			}
-		}
-	}
-
-	switch changes.Scheduling.Mode {
-	case Clear:
-		for cluster := range before.Status.ClusterSchedulingStatuses {
-			expectation.RemovedClusters[cluster] = struct{}{}
-		}
-	case Replace:
-		for cluster := range before.Status.ClusterSchedulingStatuses {
-			if _, retained := resultClusters[cluster]; !retained {
-				expectation.RemovedClusters[cluster] = struct{}{}
-			}
-		}
-	}
-
-	targetClusters := map[string]struct{}{}
-	if summary.ConfigChanged {
-		host := changedWaitTarget(
-			before.Status.InstallationStatus,
-			true,
+	beforeHostConfig := []byte(before.Spec.Config)
+	resultHostConfig := []byte(summary.ResultConfig)
+	if !bytes.Equal(beforeHostConfig, resultHostConfig) {
+		host := baselineWaitTarget(
 			baseline.Status.InstallationStatus,
 			true,
 			version,
-			true,
+			controllerConfigHash(resultHostConfig),
 		)
 		expectation.Host = &host
-		for cluster := range before.Status.ClusterSchedulingStatuses {
-			targetClusters[cluster] = struct{}{}
-		}
-		for cluster := range baseline.Status.ClusterSchedulingStatuses {
-			targetClusters[cluster] = struct{}{}
-		}
-		for cluster := range resultClusters {
-			targetClusters[cluster] = struct{}{}
-		}
 	}
 
-	if summary.SchedulingChanged && changes.Scheduling.Mode == Replace {
-		for cluster := range resultClusters {
-			targetClusters[cluster] = struct{}{}
+	beforeClusters := knownPlacementClusters(before.Spec.ClusterScheduling)
+	for _, cluster := range slices.Sorted(maps.Keys(resultClusters)) {
+		beforeConfig := effectiveClusterConfig(
+			before.Spec.Config,
+			before.Spec.ClusterScheduling,
+			cluster,
+		)
+		resultConfig := effectiveClusterConfig(
+			summary.ResultConfig,
+			summary.ResultScheduling,
+			cluster,
+		)
+		_, retained := beforeClusters[cluster]
+		if retained && bytes.Equal(beforeConfig, resultConfig) {
+			continue
 		}
-	}
-
-	beforeOverrides := schedulingOverrides(before.Spec.ClusterScheduling)
-	afterOverrides := schedulingOverrides(summary.ResultScheduling)
-	for cluster := range changes.Scheduling.SetOverrides {
-		if beforeOverrides[cluster] != afterOverrides[cluster] {
-			targetClusters[cluster] = struct{}{}
-		}
-	}
-	for _, cluster := range changes.Scheduling.RemoveOverrides {
-		_, existedBefore := beforeOverrides[cluster]
-		_, existsAfter := afterOverrides[cluster]
-		if existedBefore && !existsAfter {
-			targetClusters[cluster] = struct{}{}
-		}
-	}
-
-	for cluster := range expectation.RemovedClusters {
-		delete(targetClusters, cluster)
-	}
-	for _, cluster := range slices.Sorted(maps.Keys(targetClusters)) {
-		beforeStatus, beforeFound := before.Status.ClusterSchedulingStatuses[cluster]
-		afterStatus, afterFound := baseline.Status.ClusterSchedulingStatuses[cluster]
-		expectation.Clusters[cluster] = changedWaitTarget(
-			beforeStatus,
-			beforeFound,
-			afterStatus,
-			afterFound,
+		status, found := baseline.Status.ClusterSchedulingStatuses[cluster]
+		expectation.Clusters[cluster] = baselineWaitTarget(
+			status,
+			found,
 			version,
-			summary.ConfigChanged,
+			controllerConfigHash(resultConfig),
 		)
 	}
 	return expectation
 }
 
-func schedulingOverrides(scheduling *ClusterScheduling) map[string]string {
-	if scheduling == nil {
-		return nil
+func knownPlacementClusters(
+	scheduling *ClusterScheduling,
+) map[string]struct{} {
+	clusters := map[string]struct{}{}
+	if scheduling == nil || scheduling.Placement == nil {
+		return clusters
 	}
-	return scheduling.Overrides
+	for _, cluster := range scheduling.Placement.Clusters {
+		clusters[cluster] = struct{}{}
+	}
+	return clusters
+}
+
+func hasDeterministicPlacement(scheduling *ClusterScheduling) bool {
+	return scheduling != nil &&
+		scheduling.Placement != nil &&
+		!selectorOnlyPlacement(scheduling)
+}
+
+func removedWaitTargets(
+	before InstallPlan,
+	baseline InstallPlan,
+	resultClusters map[string]struct{},
+	cleanupExpected bool,
+) map[string]removedWaitTarget {
+	result := map[string]removedWaitTarget{}
+	if !cleanupExpected {
+		return result
+	}
+	candidates := map[string]struct{}{}
+	for cluster := range before.Status.ClusterSchedulingStatuses {
+		candidates[cluster] = struct{}{}
+	}
+	for cluster := range baseline.Status.ClusterSchedulingStatuses {
+		candidates[cluster] = struct{}{}
+	}
+	for _, cluster := range slices.Sorted(maps.Keys(candidates)) {
+		if _, retained := resultClusters[cluster]; retained {
+			continue
+		}
+		status, found := baseline.Status.ClusterSchedulingStatuses[cluster]
+		if !found {
+			continue
+		}
+		result[cluster] = removedWaitTarget{
+			Baseline: statusFingerprint(status),
+		}
+	}
+	return result
+}
+
+func effectiveClusterConfig(
+	config string,
+	scheduling *ClusterScheduling,
+	cluster string,
+) []byte {
+	if scheduling == nil {
+		return []byte(config)
+	}
+	override, found := scheduling.Overrides[cluster]
+	if !found {
+		return []byte(config)
+	}
+	return mergeControllerConfig(config, override)
+}
+
+func mergeControllerConfig(config, override string) []byte {
+	config = strings.TrimSpace(config)
+	override = strings.TrimSpace(override)
+	switch {
+	case config == "" && override == "":
+		return []byte("")
+	case override == "":
+		return []byte(config)
+	case config == "":
+		return []byte(override)
+	}
+
+	base := map[string]any{}
+	_ = yaml3.Unmarshal([]byte(config), &base)
+	overlay := map[string]any{}
+	_ = yaml3.Unmarshal([]byte(override), &overlay)
+	merged, _ := yaml3.Marshal(mergeConfigValues(base, overlay))
+	return merged
+}
+
+func mergeConfigValues(destination, source map[string]any) map[string]any {
+	for key, value := range source {
+		current, found := destination[key]
+		if !found {
+			destination[key] = value
+			continue
+		}
+		sourceMap, sourceIsMap := value.(map[string]any)
+		destinationMap, destinationIsMap := current.(map[string]any)
+		if !sourceIsMap || !destinationIsMap {
+			destination[key] = value
+			continue
+		}
+		destination[key] = mergeConfigValues(destinationMap, sourceMap)
+	}
+	return destination
+}
+
+func controllerConfigHash(config []byte) string {
+	hash := fnv.New64a()
+	_, _ = hash.Write(config)
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func targetSatisfied(
@@ -312,11 +393,36 @@ func targetSatisfied(
 	if target.Version != "" && status.Version != target.Version {
 		return false
 	}
-	if (target.requireConfigHashChange || target.ConfigHash != "") &&
-		status.ConfigHash == target.ConfigHash {
+	if target.ConfigHash != "" && status.ConfigHash != target.ConfigHash {
 		return false
 	}
 	return !target.MustAdvance || advanced
+}
+
+func targetStatusMatches(status InstallationStatus, target waitTarget) bool {
+	return targetSatisfied(status, target, true)
+}
+
+func targetFailureIsTerminal(
+	status InstallationStatus,
+	target waitTarget,
+	advanced bool,
+) bool {
+	if !failedState(status.State) || !advanced {
+		return false
+	}
+	if status.State != "InstallFailed" &&
+		status.State != "UpgradeFailed" {
+		return true
+	}
+	if target.ConfigHash == "" {
+		return true
+	}
+	versionChanged := status.Version != "" &&
+		status.Version != target.Version
+	configChanged := status.ConfigHash == "" ||
+		status.ConfigHash != target.ConfigHash
+	return !versionChanged && !configChanged
 }
 
 func evaluateOperation(
@@ -325,6 +431,13 @@ func evaluateOperation(
 	advanced map[string]bool,
 ) (bool, error) {
 	if operation.Kind == OperationUninstall {
+		if operation.acceptedUID != "" &&
+			plan.Metadata.UID != operation.acceptedUID {
+			return false, fmt.Errorf(
+				"extension %q uninstall was superseded: install plan identity changed",
+				operation.Name,
+			)
+		}
 		if plan.Status.State == "UninstallFailed" {
 			return false, lifecycleFailure(
 				operation.Name,
@@ -332,7 +445,10 @@ func evaluateOperation(
 				plan.Status.InstallationStatus,
 			)
 		}
-		for cluster, status := range plan.Status.ClusterSchedulingStatuses {
+		for _, cluster := range slices.Sorted(
+			maps.Keys(plan.Status.ClusterSchedulingStatuses),
+		) {
+			status := plan.Status.ClusterSchedulingStatuses[cluster]
 			if status.State == "UninstallFailed" {
 				return false, lifecycleFailure(
 					operation.Name,
@@ -343,36 +459,112 @@ func evaluateOperation(
 		}
 		return false, nil
 	}
+	if operation.hasAccepted {
+		if plan.Metadata.DeletionTimestamp != nil {
+			return false, fmt.Errorf(
+				"extension %q operation was superseded: accepted install plan is being deleted",
+				operation.Name,
+			)
+		}
+		if operation.acceptedUID != "" &&
+			plan.Metadata.UID != operation.acceptedUID {
+			return false, fmt.Errorf(
+				"extension %q operation was superseded: accepted install plan identity changed",
+				operation.Name,
+			)
+		}
+		if !reflect.DeepEqual(plan.Spec, operation.acceptedSpec) {
+			return false, fmt.Errorf(
+				"extension %q operation was superseded: accepted install plan spec changed",
+				operation.Name,
+			)
+		}
+	}
 
+	clusterNames := slices.Sorted(maps.Keys(operation.expectation.Clusters))
+	removedNames := slices.Sorted(maps.Keys(operation.expectation.RemovedClusters))
+
+	// First record advancement for every target. Failure checks happen only
+	// after this pass so an incomplete target cannot mask a later failure.
 	if target := operation.expectation.Host; target != nil {
 		status := plan.Status.InstallationStatus
 		if statusFingerprint(status) != target.Baseline {
 			advanced["host"] = true
 		}
-		if failedState(status.State) && advanced["host"] {
-			return false, lifecycleFailure(operation.Name, "host", status)
-		}
-		if !targetSatisfied(status, *target, advanced["host"]) {
-			return false, nil
-		}
 	}
-	for cluster, target := range operation.expectation.Clusters {
+	for _, cluster := range clusterNames {
+		target := operation.expectation.Clusters[cluster]
 		status, found := plan.Status.ClusterSchedulingStatuses[cluster]
 		if !found {
-			return false, nil
+			continue
 		}
 		scope := "cluster/" + cluster
 		if statusFingerprint(status) != target.Baseline {
 			advanced[scope] = true
 		}
-		if failedState(status.State) && advanced[scope] {
+	}
+	for _, cluster := range removedNames {
+		target := operation.expectation.RemovedClusters[cluster]
+		status, found := plan.Status.ClusterSchedulingStatuses[cluster]
+		if !found {
+			continue
+		}
+		scope := "cluster/" + cluster
+		if statusFingerprint(status) != target.Baseline {
+			advanced[scope] = true
+		}
+	}
+
+	if target := operation.expectation.Host; target != nil {
+		status := plan.Status.InstallationStatus
+		if targetFailureIsTerminal(status, *target, advanced["host"]) {
+			return false, lifecycleFailure(operation.Name, "host", status)
+		}
+	}
+	for _, cluster := range clusterNames {
+		status, found := plan.Status.ClusterSchedulingStatuses[cluster]
+		if !found {
+			continue
+		}
+		scope := "cluster/" + cluster
+		if status.State == "UninstallFailed" ||
+			targetFailureIsTerminal(
+				status,
+				operation.expectation.Clusters[cluster],
+				advanced[scope],
+			) {
 			return false, lifecycleFailure(operation.Name, scope, status)
 		}
+	}
+	for _, cluster := range removedNames {
+		status, found := plan.Status.ClusterSchedulingStatuses[cluster]
+		if !found {
+			continue
+		}
+		scope := "cluster/" + cluster
+		if status.State == "UninstallFailed" {
+			return false, lifecycleFailure(operation.Name, scope, status)
+		}
+	}
+
+	if target := operation.expectation.Host; target != nil {
+		status := plan.Status.InstallationStatus
+		if !targetSatisfied(status, *target, advanced["host"]) {
+			return false, nil
+		}
+	}
+	for _, cluster := range clusterNames {
+		target := operation.expectation.Clusters[cluster]
+		status, found := plan.Status.ClusterSchedulingStatuses[cluster]
+		if !found {
+			return false, nil
+		}
+		scope := "cluster/" + cluster
 		if !targetSatisfied(status, target, advanced[scope]) {
 			return false, nil
 		}
 	}
-	for cluster := range operation.expectation.RemovedClusters {
+	for _, cluster := range removedNames {
 		if _, found := plan.Status.ClusterSchedulingStatuses[cluster]; found {
 			return false, nil
 		}
@@ -387,6 +579,12 @@ func (s *Service) Wait(
 ) (WaitResult, error) {
 	if options.Timeout <= 0 {
 		return WaitResult{}, fmt.Errorf("wait timeout must be positive")
+	}
+	if operation.expectation.SelectorOnly {
+		return WaitResult{}, fmt.Errorf(
+			"extension %q request was accepted, but dynamic clusterSelector placement cannot be tracked safely; omit --wait or replace it with --clusters",
+			operation.Name,
+		)
 	}
 	ctx, cancel := context.WithTimeout(parent, options.Timeout)
 	defer cancel()
@@ -465,6 +663,9 @@ func (s *Service) Watch(
 				name,
 				err,
 			)
+		}
+		if err := ensurePlanIdentity(name, plan.Value); err != nil {
+			return Object[InstallPlan]{}, err
 		}
 		status := plan.Value.Status.InstallationStatus
 		if status.State != lastState {

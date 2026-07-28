@@ -311,12 +311,12 @@ func TestExtensionIntegration(t *testing.T) {
 					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"Extension","metadata":{"name":"demo"}}`,
 				)
 			case request.Method == http.MethodGet &&
-				request.URL.Path == "/apis/kubesphere.io/v1alpha1/extensionversions":
+				request.URL.Path == "/apis/kubesphere.io/v1alpha1/extensionversions/demo-v1.2.1-build.1":
 				writeIntegrationJSON(
 					t,
 					response,
 					http.StatusOK,
-					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersionList","items":[{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersion","metadata":{"name":"demo-v1","labels":{"kubesphere.io/extension-ref":"demo"}},"spec":{"version":"v1.2.1+build","installationMode":"HostOnly"}}]}`,
+					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersion","metadata":{"name":"demo-v1.2.1-build.1"},"spec":{"version":"v1.2.1-build.1","installationMode":"HostOnly"}}`,
 				)
 			case request.Method == http.MethodGet &&
 				request.URL.Path == "/apis/kubesphere.io/v1alpha1/installplans/demo":
@@ -330,7 +330,7 @@ func TestExtensionIntegration(t *testing.T) {
 					t,
 					response,
 					http.StatusCreated,
-					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"InstallPlan","metadata":{"name":"demo","resourceVersion":"1"},"spec":{"extension":{"name":"demo","version":"v1.2.1+build"},"enabled":true,"upgradeStrategy":"Manual"}}`,
+					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"InstallPlan","metadata":{"name":"demo","resourceVersion":"1"},"spec":{"extension":{"name":"demo","version":"v1.2.1-build.1"},"enabled":true,"upgradeStrategy":"Manual"}}`,
 				)
 			default:
 				http.NotFound(response, request)
@@ -346,7 +346,7 @@ func TestExtensionIntegration(t *testing.T) {
 				"install",
 				"demo",
 				"--version",
-				"v1.2.1+build",
+				"v1.2.1-build.1",
 			)...,
 		)
 		if err != nil {
@@ -358,7 +358,7 @@ func TestExtensionIntegration(t *testing.T) {
 		spec := created["spec"].(map[string]any)
 		if spec["enabled"] != true ||
 			spec["upgradeStrategy"] != "Manual" ||
-			spec["extension"].(map[string]any)["version"] != "v1.2.1+build" {
+			spec["extension"].(map[string]any)["version"] != "v1.2.1-build.1" {
 			t.Fatalf("created plan = %#v", created)
 		}
 		assertHostOnlyExtensionRequests(t, dispatcher.paths())
@@ -384,12 +384,12 @@ func TestExtensionIntegration(t *testing.T) {
 					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"InstallPlan","metadata":{"name":"demo","resourceVersion":"7"},"spec":{"extension":{"name":"demo","version":"1.2.0"},"enabled":true,"upgradeStrategy":"Manual"},"status":{"state":"Installed","version":"1.2.0"}}`,
 				)
 			case request.Method == http.MethodGet &&
-				request.URL.Path == "/apis/kubesphere.io/v1alpha1/extensionversions":
+				request.URL.Path == "/apis/kubesphere.io/v1alpha1/extensionversions/demo-1.2.1":
 				writeIntegrationJSON(
 					t,
 					response,
 					http.StatusOK,
-					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersionList","items":[{"metadata":{"name":"demo-1-2-1","labels":{"kubesphere.io/extension-ref":"demo"}},"spec":{"version":"1.2.1","installationMode":"HostOnly"}}]}`,
+					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersion","metadata":{"name":"demo-1.2.1"},"spec":{"version":"1.2.1","installationMode":"HostOnly"}}`,
 				)
 			case request.Method == http.MethodPatch &&
 				request.URL.Path == "/apis/kubesphere.io/v1alpha1/installplans/demo":
@@ -566,12 +566,12 @@ func TestExtensionIntegration(t *testing.T) {
 					http.StatusOK,
 					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"InstallPlan","metadata":{"name":"demo"},"spec":{"extension":{"name":"demo","version":"1.2.1"},"enabled":true},"status":{"state":"Installed","version":"1.2.1","clusterSchedulingStatuses":{"member-a":{"state":"Installed","version":"1.2.1","targetNamespace":"member-executor","jobName":"member-install"}}}}`,
 				)
-			case "/apis/kubesphere.io/v1alpha1/extensionversions":
+			case "/apis/kubesphere.io/v1alpha1/extensionversions/demo-1.2.1":
 				writeIntegrationJSON(
 					t,
 					response,
 					http.StatusOK,
-					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersionList","items":[{"metadata":{"name":"demo-1-2-1"},"spec":{"version":"1.2.1","installationMode":"Multicluster"}}]}`,
+					`{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersion","metadata":{"name":"demo-1.2.1"},"spec":{"version":"1.2.1","installationMode":"Multicluster"}}`,
 				)
 			case "/api/v1/namespaces/member-executor":
 				writeIntegrationJSON(

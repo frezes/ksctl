@@ -52,6 +52,8 @@ func TestRESTClientUsesHostCatalogPathsAndSelectors(t *testing.T) {
 			writeJSONResponse(t, response, `{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionList","items":[]}`)
 		case "/apis/kubesphere.io/v1alpha1/extensionversions":
 			writeJSONResponse(t, response, `{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersionList","items":[]}`)
+		case "/apis/kubesphere.io/v1alpha1/extensionversions/demo-1.2.1":
+			writeJSONResponse(t, response, `{"apiVersion":"kubesphere.io/v1alpha1","kind":"ExtensionVersion","metadata":{"name":"demo-1.2.1"},"spec":{"version":"1.2.1"}}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -63,8 +65,14 @@ func TestRESTClientUsesHostCatalogPathsAndSelectors(t *testing.T) {
 	if _, err := client.ListExtensionVersions(context.Background(), "demo"); err != nil {
 		t.Fatalf("ListExtensionVersions() error = %v", err)
 	}
+	if _, err := client.GetExtensionVersion(
+		context.Background(),
+		"demo-1.2.1",
+	); err != nil {
+		t.Fatalf("GetExtensionVersion() error = %v", err)
+	}
 
-	if len(requests) != 2 {
+	if len(requests) != 3 {
 		t.Fatalf("requests = %v", requests)
 	}
 	first, err := url.ParseRequestURI(strings.TrimPrefix(requests[0], "GET "))
@@ -91,6 +99,7 @@ func TestRESTClientUsesHostCatalogPathsAndSelectors(t *testing.T) {
 func TestRESTClientInstallPlanCRUD(t *testing.T) {
 	var createBody map[string]any
 	var patchBody map[string]any
+	var deleteBody map[string]any
 	var patchContentType string
 	var methods []string
 	client := newTestAPIClient(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -112,6 +121,9 @@ func TestRESTClientInstallPlanCRUD(t *testing.T) {
 			}
 			writeJSONResponse(t, response, `{"apiVersion":"kubesphere.io/v1alpha1","kind":"InstallPlan","metadata":{"name":"demo","resourceVersion":"10"},"spec":{"extension":{"name":"demo","version":"1.2.1"},"enabled":true,"upgradeStrategy":"Manual"}}`)
 		case request.Method == http.MethodDelete && request.URL.Path == "/apis/kubesphere.io/v1alpha1/installplans/demo":
+			if err := json.NewDecoder(request.Body).Decode(&deleteBody); err != nil {
+				t.Errorf("decode delete body: %v", err)
+			}
 			writeJSONResponse(t, response, `{"apiVersion":"v1","kind":"Status","status":"Success","code":200}`)
 		default:
 			http.NotFound(response, request)
@@ -146,7 +158,11 @@ func TestRESTClientInstallPlanCRUD(t *testing.T) {
 	if _, err := client.PatchInstallPlan(context.Background(), "demo", patch); err != nil {
 		t.Fatalf("PatchInstallPlan() error = %v", err)
 	}
-	if err := client.DeleteInstallPlan(context.Background(), "demo"); err != nil {
+	if err := client.DeleteInstallPlan(
+		context.Background(),
+		"demo",
+		"10",
+	); err != nil {
 		t.Fatalf("DeleteInstallPlan() error = %v", err)
 	}
 
@@ -162,6 +178,9 @@ func TestRESTClientInstallPlanCRUD(t *testing.T) {
 	}
 	if patchBody["metadata"].(map[string]any)["resourceVersion"] != "9" {
 		t.Fatalf("patch body = %#v", patchBody)
+	}
+	if deleteBody["preconditions"].(map[string]any)["resourceVersion"] != "10" {
+		t.Fatalf("delete body = %#v", deleteBody)
 	}
 	if len(methods) != 5 {
 		t.Fatalf("methods = %v", methods)
@@ -221,6 +240,52 @@ func TestRESTClientPreservesKubernetesStatusErrors(t *testing.T) {
 	}
 }
 
+func TestRESTClientPreservesForbiddenAndConflictStatusErrors(t *testing.T) {
+	t.Run("forbidden", func(t *testing.T) {
+		client := newTestAPIClient(t, http.HandlerFunc(func(
+			response http.ResponseWriter,
+			_ *http.Request,
+		) {
+			response.Header().Set("Content-Type", "application/json")
+			response.WriteHeader(http.StatusForbidden)
+			writeJSONResponse(
+				t,
+				response,
+				`{"apiVersion":"v1","kind":"Status","status":"Failure","reason":"Forbidden","message":"forbidden","code":403}`,
+			)
+		}), nil)
+
+		_, err := client.GetExtension(context.Background(), "demo")
+		if !apierrors.IsForbidden(err) {
+			t.Fatalf("GetExtension() error = %v, want recognizable Forbidden", err)
+		}
+	})
+
+	t.Run("conflict", func(t *testing.T) {
+		client := newTestAPIClient(t, http.HandlerFunc(func(
+			response http.ResponseWriter,
+			_ *http.Request,
+		) {
+			response.Header().Set("Content-Type", "application/json")
+			response.WriteHeader(http.StatusConflict)
+			writeJSONResponse(
+				t,
+				response,
+				`{"apiVersion":"v1","kind":"Status","status":"Failure","reason":"Conflict","message":"resourceVersion conflict","code":409}`,
+			)
+		}), nil)
+
+		_, err := client.PatchInstallPlan(
+			context.Background(),
+			"demo",
+			[]byte(`{"metadata":{"resourceVersion":"old"}}`),
+		)
+		if !apierrors.IsConflict(err) {
+			t.Fatalf("PatchInstallPlan() error = %v, want recognizable Conflict", err)
+		}
+	})
+}
+
 func TestRESTClientRejectsMalformedAndMismatchedResponses(t *testing.T) {
 	t.Run("malformed", func(t *testing.T) {
 		client := newTestAPIClient(t, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
@@ -239,6 +304,15 @@ func TestRESTClientRejectsMalformedAndMismatchedResponses(t *testing.T) {
 			t.Fatalf("GetExtension() error = %v, want mismatched name", err)
 		}
 	})
+}
+
+func TestValidatePathNameRejectsEmptyAndWhitespaceOnlyNames(t *testing.T) {
+	for _, name := range []string{"", " ", "\t"} {
+		if err := validatePathName("extension", name); err == nil ||
+			!strings.Contains(err.Error(), "non-empty") {
+			t.Fatalf("validatePathName(%q) error = %v", name, err)
+		}
+	}
 }
 
 func TestRESTClientPropagatesCredentialsUserAgentAndTimeout(t *testing.T) {

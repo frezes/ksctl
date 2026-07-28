@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ func prepareDiagnosis(
 		"ExtensionVersionList",
 		version,
 	)
+	client.versionObjects[version.Metadata.Name] = objectForTest(t, version)
 }
 
 func completeJob(namespace, name string, completion time.Time) Job {
@@ -155,7 +157,7 @@ func TestServiceDiagnoseHealthyResourcesInStableOrder(t *testing.T) {
 	wantCalls := []string{
 		"get extension demo",
 		"get install plan demo",
-		"list versions demo",
+		"get extension version demo-1.2.1",
 		"get install plan logging",
 		"get namespace demo-system",
 		"get job demo-system/install-demo",
@@ -251,6 +253,12 @@ func TestServiceDiagnoseReportsUnknownTargetCluster(t *testing.T) {
 	if check.Status != DiagnosticError || !strings.Contains(check.Message, "not found") {
 		t.Fatalf("cluster check = %#v", check)
 	}
+	planCheck := findDiagnosticCheck(t, diagnosis, "install-plan")
+	if planCheck.Status != DiagnosticError ||
+		!strings.Contains(planCheck.Message, "scope=cluster/missing") ||
+		!strings.Contains(planCheck.Message, "no status") {
+		t.Fatalf("install-plan check = %#v", planCheck)
+	}
 	for _, call := range client.calls {
 		if strings.HasPrefix(call, "get namespace ") ||
 			strings.HasPrefix(call, "get job ") ||
@@ -269,6 +277,7 @@ func TestServiceDiagnoseReportsMissingExactVersion(t *testing.T) {
 		"kubesphere.io/v1alpha1",
 		"ExtensionVersionList",
 	)
+	delete(client.versionObjects, "demo-1.2.1")
 	client.namespaces["demo-system"] = Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo-system"},
 	}
@@ -284,6 +293,111 @@ func TestServiceDiagnoseReportsMissingExactVersion(t *testing.T) {
 	}
 	check := findDiagnosticCheck(t, diagnosis, "version")
 	if check.Status != DiagnosticError || !strings.Contains(check.Message, "1.2.1") {
+		t.Fatalf("version check = %#v", check)
+	}
+}
+
+func TestServiceDiagnoseChecksControllerTargetVersion(t *testing.T) {
+	client := newFakeAPIClient(t)
+	plan := diagnosticPlan("Installed")
+	plan.Spec.Extension.Version = "2.0.0"
+	plan.Status.Version = "1.2.1"
+	prepareDiagnosis(t, client, plan, diagnosticVersion())
+
+	diagnosis, err := NewService(client).Diagnose(
+		context.Background(),
+		"demo",
+		DiagnoseOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Diagnose() error = %v", err)
+	}
+	check := findDiagnosticCheck(t, diagnosis, "version")
+	if check.Status != DiagnosticError ||
+		!strings.Contains(check.Message, "demo-2.0.0") {
+		t.Fatalf("version check = %#v", check)
+	}
+	if !slices.Contains(
+		client.calls,
+		"get extension version demo-2.0.0",
+	) {
+		t.Fatalf("calls = %v, want target version lookup", client.calls)
+	}
+}
+
+func TestServiceDiagnoseRejectsMismatchedInstallPlanIdentity(t *testing.T) {
+	client := newFakeAPIClient(t)
+	plan := diagnosticPlan("Installed")
+	plan.Spec.Extension.Name = "other"
+	prepareDiagnosis(t, client, plan, diagnosticVersion(
+		ExternalDependency{Name: "logging", Version: "1.x", Required: true},
+	))
+
+	diagnosis, err := NewService(client).Diagnose(
+		context.Background(),
+		"demo",
+		DiagnoseOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Diagnose() error = %v", err)
+	}
+	check := findDiagnosticCheck(t, diagnosis, "install-plan")
+	if check.Status != DiagnosticError ||
+		!strings.Contains(check.Message, `references extension "other"`) {
+		t.Fatalf("install-plan check = %#v", check)
+	}
+	for _, call := range client.calls {
+		if strings.HasPrefix(call, "get extension version ") ||
+			strings.HasPrefix(call, "get install plan logging") {
+			t.Fatalf("trusted mismatched plan: calls = %v", client.calls)
+		}
+	}
+}
+
+func TestServiceDiagnoseReportsDeletingInstallPlan(t *testing.T) {
+	client := newFakeAPIClient(t)
+	plan := diagnosticPlan("Installed")
+	now := metav1.Now()
+	plan.Metadata.DeletionTimestamp = &now
+	prepareDiagnosis(t, client, plan, diagnosticVersion())
+
+	diagnosis, err := NewService(client).Diagnose(
+		context.Background(),
+		"demo",
+		DiagnoseOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Diagnose() error = %v", err)
+	}
+	check := findDiagnosticCheck(t, diagnosis, "install-plan")
+	if check.Status != DiagnosticError ||
+		!strings.Contains(check.Message, "deleting") {
+		t.Fatalf("install-plan check = %#v", check)
+	}
+	if !errors.Is(diagnosis.Err(), ErrDiagnosisFailed) {
+		t.Fatalf("Diagnosis.Err() = %v, want deleting failure", diagnosis.Err())
+	}
+}
+
+func TestServiceDiagnoseRequiresExactVersionResourceIdentity(t *testing.T) {
+	client := newFakeAPIClient(t)
+	plan := diagnosticPlan("Installed")
+	prepareDiagnosis(t, client, plan, diagnosticVersion())
+	wrong := diagnosticVersion()
+	wrong.Metadata.Name = "demo-1-2-1"
+	client.versionObjects["demo-1.2.1"] = objectForTest(t, wrong)
+
+	diagnosis, err := NewService(client).Diagnose(
+		context.Background(),
+		"demo",
+		DiagnoseOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Diagnose() error = %v", err)
+	}
+	check := findDiagnosticCheck(t, diagnosis, "version")
+	if check.Status != DiagnosticError ||
+		!strings.Contains(check.Message, `requires resource "demo-1.2.1"`) {
 		t.Fatalf("version check = %#v", check)
 	}
 }
@@ -323,6 +437,40 @@ func TestServiceDiagnoseMapsDependencySeverities(t *testing.T) {
 	}
 	if !errors.Is(diagnosis.Err(), ErrDiagnosisFailed) {
 		t.Fatalf("Diagnosis.Err() = %v", diagnosis.Err())
+	}
+}
+
+func TestServiceDiagnoseDependencyIncludesUnderlyingCause(t *testing.T) {
+	client := newFakeAPIClient(t)
+	plan := diagnosticPlan("Installed")
+	plan.Status.JobName = ""
+	plan.Status.TargetNamespace = ""
+	prepareDiagnosis(
+		t,
+		client,
+		plan,
+		diagnosticVersion(ExternalDependency{
+			Name:     "logging",
+			Version:  "1.x",
+			Required: true,
+		}),
+	)
+	dependency := planForTest("logging", "1.4.0", "Installed")
+	dependency.Spec.Extension.Name = "other"
+	client.planObjects["logging"] = objectForTest(t, dependency)
+
+	diagnosis, err := NewService(client).Diagnose(
+		context.Background(),
+		"demo",
+		DiagnoseOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Diagnose() error = %v", err)
+	}
+	check := findDiagnosticCheck(t, diagnosis, "dependency/logging")
+	if check.Status != DiagnosticError ||
+		!strings.Contains(check.Message, `references extension "other"`) {
+		t.Fatalf("dependency check = %#v", check)
 	}
 }
 
@@ -381,6 +529,21 @@ func TestServiceDiagnoseMapsJobSeveritiesAndMissingJob(t *testing.T) {
 			state: "Installed",
 			job: func() *Job {
 				job := completeJob("demo-system", "install-demo", time.Now())
+				return &job
+			}(),
+			wantStatus: DiagnosticOK,
+			wantText:   "complete",
+		},
+		{
+			name:  "complete after retry",
+			state: "Installed",
+			job: func() *Job {
+				job := completeJob(
+					"demo-system",
+					"install-demo",
+					time.Now(),
+				)
+				job.Status.Failed = 1
 				return &job
 			}(),
 			wantStatus: DiagnosticOK,
@@ -538,6 +701,160 @@ func TestServiceDiagnoseSortsPodsAndReportsTerminations(t *testing.T) {
 			!strings.Contains(podChecks[want.index].Message, want.text) {
 			t.Fatalf("pod check = %#v, want %q", podChecks[want.index], want.text)
 		}
+	}
+}
+
+func TestPodDiagnosticReportsActionableWaitingReasons(t *testing.T) {
+	for _, reason := range []string{
+		"CrashLoopBackOff",
+		"ImagePullBackOff",
+		"ErrImagePull",
+		"CreateContainerConfigError",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			pod := corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					ContainerStatuses: []corev1.ContainerStatus{{
+						Name: "installer",
+						State: corev1.ContainerState{
+							Waiting: &corev1.ContainerStateWaiting{
+								Reason:  reason,
+								Message: "executor cannot start",
+							},
+						},
+					}},
+				},
+			}
+
+			status, message := podDiagnostic(
+				pod,
+				"demo-system",
+				"install-demo",
+			)
+			if status != DiagnosticError ||
+				!strings.Contains(message, "installer="+reason) ||
+				!strings.Contains(
+					message,
+					"kubectl -n demo-system logs job/install-demo",
+				) {
+				t.Fatalf(
+					"podDiagnostic() = (%q, %q), want actionable error",
+					status,
+					message,
+				)
+			}
+		})
+	}
+}
+
+func TestPodDiagnosticReportsRecoveredLastTermination(t *testing.T) {
+	pod := corev1.Pod{
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "installer",
+				State: corev1.ContainerState{
+					Running: &corev1.ContainerStateRunning{},
+				},
+				LastTerminationState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						Reason:   "Error",
+						ExitCode: 17,
+					},
+				},
+			}},
+		},
+	}
+
+	status, message := podDiagnostic(
+		pod,
+		"demo-system",
+		"install-demo",
+	)
+	if status != DiagnosticWarn ||
+		!strings.Contains(message, "installer(last)=Error(exit=17)") ||
+		strings.Contains(message, "kubectl") {
+		t.Fatalf(
+			"podDiagnostic() = (%q, %q), want recovered history warning",
+			status,
+			message,
+		)
+	}
+}
+
+func TestServiceDiagnoseCompletedJobDowngradesFailedAttemptPod(t *testing.T) {
+	client := newFakeAPIClient(t)
+	plan := diagnosticPlan("Installed")
+	prepareDiagnosis(t, client, plan, diagnosticVersion())
+	client.namespaces["demo-system"] = Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo-system"},
+	}
+	job := completeJob("demo-system", "install-demo", time.Now())
+	job.Status.Failed = 1
+	client.jobs["demo-system/install-demo"] = job
+	client.pods["demo-system/install-demo"] = PodList{Items: []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Name: "failed-attempt"},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "installer",
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						Reason:   "Error",
+						ExitCode: 1,
+					},
+				},
+			}},
+		},
+	}}}
+
+	diagnosis, err := NewService(client).Diagnose(
+		context.Background(),
+		"demo",
+		DiagnoseOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Diagnose() error = %v", err)
+	}
+	check := findDiagnosticCheck(t, diagnosis, "pod/failed-attempt")
+	if check.Status != DiagnosticWarn ||
+		!strings.Contains(check.Message, "historical failed attempt") {
+		t.Fatalf("pod check = %#v", check)
+	}
+	if err := diagnosis.Err(); err != nil {
+		t.Fatalf("Diagnosis.Err() = %v", err)
+	}
+}
+
+func TestPodDiagnosticKeepsNormalWaitingInformational(t *testing.T) {
+	pod := corev1.Pod{
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "installer",
+				State: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Reason: "ContainerCreating",
+					},
+				},
+			}},
+		},
+	}
+
+	status, message := podDiagnostic(
+		pod,
+		"demo-system",
+		"install-demo",
+	)
+	if status != DiagnosticInfo ||
+		!strings.Contains(message, "installer=ContainerCreating") ||
+		strings.Contains(message, "kubectl") {
+		t.Fatalf(
+			"podDiagnostic() = (%q, %q), want informational wait",
+			status,
+			message,
+		)
 	}
 }
 

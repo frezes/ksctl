@@ -96,6 +96,30 @@ func TestServiceListFilteredRawJSONRetainsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestServiceListRejectsMismatchedInstallPlanIdentity(t *testing.T) {
+	client := newFakeAPIClient(t)
+	client.extensions = listForTest(
+		t,
+		"kubesphere.io/v1alpha1",
+		"ExtensionList",
+		extensionForTest("demo"),
+	)
+	plan := planForTest("demo", "1.0.0", "Installed")
+	plan.Spec.Extension.Name = "other"
+	client.installPlans = listForTest(
+		t,
+		"kubesphere.io/v1alpha1",
+		"InstallPlanList",
+		plan,
+	)
+
+	_, err := NewService(client).List(context.Background(), ListOptions{})
+	if err == nil ||
+		!strings.Contains(err.Error(), `references extension "other"`) {
+		t.Fatalf("List() error = %v, want identity rejection", err)
+	}
+}
+
 func TestServiceShowJoinsVersionsAndInstallPlan(t *testing.T) {
 	client := newFakeAPIClient(t)
 	client.extensionObjects["demo"] = objectForTest(t, extensionForTest("demo"))
@@ -121,26 +145,84 @@ func TestServiceShowJoinsVersionsAndInstallPlan(t *testing.T) {
 	}
 }
 
+func TestServiceShowRejectsMismatchedInstallPlanIdentity(t *testing.T) {
+	client := newFakeAPIClient(t)
+	client.extensionObjects["demo"] = objectForTest(t, extensionForTest("demo"))
+	client.versions["demo"] = listForTest[ExtensionVersion](
+		t,
+		"kubesphere.io/v1alpha1",
+		"ExtensionVersionList",
+	)
+	plan := planForTest("demo", "1.0.0", "Installed")
+	plan.Spec.Extension.Name = "other"
+	client.planObjects["demo"] = objectForTest(t, plan)
+
+	_, err := NewService(client).Show(context.Background(), "demo", "")
+	if err == nil ||
+		!strings.Contains(err.Error(), `references extension "other"`) {
+		t.Fatalf("Show() error = %v, want identity rejection", err)
+	}
+}
+
 func TestServiceShowSelectsOnlyExactOpaqueVersion(t *testing.T) {
 	client := newFakeAPIClient(t)
 	client.extensionObjects["demo"] = objectForTest(t, extensionForTest("demo"))
+	selected := versionForTest(
+		"demo",
+		"demo-v1.0.0+build",
+		"v1.0.0+build",
+	)
+	client.versionObjects[selected.Metadata.Name] = objectForTest(t, selected)
 	client.versions["demo"] = listForTest(
 		t,
 		"kubesphere.io/v1alpha1",
 		"ExtensionVersionList",
-		versionForTest("demo", "demo-v1", "v1.0.0"),
-		versionForTest("demo", "demo-1", "1.0.0"),
+		versionForTest("demo", "wrong-name", "v1.0.0+build"),
 	)
 
-	result, err := NewService(client).Show(context.Background(), "demo", "v1.0.0")
+	result, err := NewService(client).Show(
+		context.Background(),
+		"demo",
+		"v1.0.0+build",
+	)
 	if err != nil {
 		t.Fatalf("Show() error = %v", err)
 	}
-	if result.SelectedVersion == nil || result.SelectedVersion.Value.Spec.Version != "v1.0.0" {
+	if result.SelectedVersion == nil ||
+		result.SelectedVersion.Value.Metadata.Name != "demo-v1.0.0+build" {
 		t.Fatalf("SelectedVersion = %#v", result.SelectedVersion)
 	}
-	if !strings.Contains(string(result.RawJSON()), `"version":"v1.0.0"`) {
+	if !strings.Contains(
+		string(result.RawJSON()),
+		`"version":"v1.0.0+build"`,
+	) {
 		t.Fatalf("RawJSON() = %s", result.RawJSON())
+	}
+	if want := []string{
+		"get extension demo",
+		"get extension version demo-v1.0.0+build",
+	}; !reflect.DeepEqual(client.calls, want) {
+		t.Fatalf("calls = %v, want %v", client.calls, want)
+	}
+}
+
+func TestServiceExactVersionRequiresControllerResourceIdentity(t *testing.T) {
+	client := newFakeAPIClient(t)
+	client.versions["demo"] = listForTest(
+		t,
+		"kubesphere.io/v1alpha1",
+		"ExtensionVersionList",
+		versionForTest("demo", "demo-1-2-1", "1.2.1"),
+	)
+
+	_, err := NewService(client).exactVersion(
+		context.Background(),
+		"demo",
+		"1.2.1",
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), `controller requires resource "demo-1.2.1"`) {
+		t.Fatalf("exactVersion() error = %v", err)
 	}
 }
 
@@ -219,5 +301,35 @@ func TestServiceStatusReturnsSortedListOrNamedObject(t *testing.T) {
 	}
 	if named.Object == nil || named.Object.Value.Metadata.Name != "zeta" {
 		t.Fatalf("named status = %#v", named)
+	}
+}
+
+func TestServiceStatusRejectsMismatchedInstallPlanIdentity(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		t.Run(map[bool]string{false: "list", true: "named"}[named], func(t *testing.T) {
+			client := newFakeAPIClient(t)
+			plan := planForTest("demo", "1.0.0", "Installed")
+			plan.Spec.Extension.Name = "other"
+			client.installPlans = listForTest(
+				t,
+				"kubesphere.io/v1alpha1",
+				"InstallPlanList",
+				plan,
+			)
+			client.planObjects["demo"] = objectForTest(t, plan)
+			name := ""
+			if named {
+				name = "demo"
+			}
+
+			_, err := NewService(client).Status(context.Background(), name)
+			if err == nil ||
+				!strings.Contains(
+					err.Error(),
+					`references extension "other"`,
+				) {
+				t.Fatalf("Status(%q) error = %v", name, err)
+			}
+		})
 	}
 }

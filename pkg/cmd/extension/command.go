@@ -3,10 +3,14 @@ package extension
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	"k8s.io/klog/v2"
+	kubesphererest "kubesphere.io/client-go/rest"
 )
 
 type Service interface {
@@ -75,7 +79,10 @@ func NewCommand(
 		Short: "Discover and manage KubeSphere extensions",
 		Args:  cobra.NoArgs,
 		PersistentPreRunE: func(command *cobra.Command, _ []string) error {
-			return rejectExplicitScope(command)
+			if err := rejectExplicitScope(command); err != nil {
+				return err
+			}
+			return rejectUnsafeVerbosity(command)
 		},
 	}
 	command.AddCommand(
@@ -92,10 +99,59 @@ func NewCommand(
 	return command
 }
 
+func rejectUnsafeVerbosity(command *cobra.Command) error {
+	verbosity := int64(0)
+	if flag := command.Flag("v"); flag != nil {
+		value, err := strconv.ParseInt(flag.Value.String(), 10, 32)
+		if err == nil {
+			verbosity = value
+		}
+	}
+	if verbosity < 8 && !klog.V(8).Enabled() {
+		return nil
+	}
+	return fmt.Errorf(
+		"extension commands require --v=7 or lower because KubeSphere REST debug logging at --v=8 can expose extension configuration",
+	)
+}
+
 func serviceAfterValidation(factory ServiceFactory) (Service, error) {
 	service, err := factory()
 	if err != nil {
 		return nil, fmt.Errorf("create extension service: %w", err)
 	}
 	return service, nil
+}
+
+func validateCommandPathName(kind, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("invalid %s %q: must be non-empty", kind, name)
+	}
+	if messages := kubesphererest.IsValidPathSegmentName(name); len(messages) != 0 {
+		return fmt.Errorf("invalid %s %q: %v", kind, name, messages)
+	}
+	return nil
+}
+
+func exactExtensionNameArgs(
+	command *cobra.Command,
+	args []string,
+) error {
+	if err := cobra.ExactArgs(1)(command, args); err != nil {
+		return err
+	}
+	return validateCommandPathName("extension", args[0])
+}
+
+func optionalExtensionNameArgs(
+	command *cobra.Command,
+	args []string,
+) error {
+	if err := cobra.MaximumNArgs(1)(command, args); err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return validateCommandPathName("extension", args[0])
 }

@@ -123,31 +123,53 @@ func TestDiagnosePrintsAccumulatedChecksBeforeServiceError(t *testing.T) {
 }
 
 func TestDiagnoseValidatesTargetBeforeFactory(t *testing.T) {
-	streams, out, _ := bufferedStreams()
-	called := false
-	err := executeExtensionCommand(
-		t,
-		[]string{
-			"extension",
-			"diagnose",
-			"demo",
-			"--target-cluster",
-			"bad/name",
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "malformed",
+			args: []string{
+				"extension",
+				"diagnose",
+				"demo",
+				"--target-cluster",
+				"bad/name",
+			},
 		},
-		streams,
-		func() (Service, error) {
-			called = true
-			return &fakeService{}, nil
+		{
+			name: "explicitly empty",
+			args: []string{
+				"extension",
+				"diagnose",
+				"demo",
+				"--target-cluster=",
+			},
 		},
-	)
-	if err == nil || !strings.Contains(err.Error(), "invalid target cluster") {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if called {
-		t.Fatal("service factory was called")
-	}
-	if out.Len() != 0 {
-		t.Fatalf("stdout = %q", out.String())
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			streams, out, _ := bufferedStreams()
+			called := false
+			err := executeExtensionCommand(
+				t,
+				test.args,
+				streams,
+				func() (Service, error) {
+					called = true
+					return &fakeService{}, nil
+				},
+			)
+			if err == nil ||
+				!strings.Contains(err.Error(), "invalid target cluster") {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if called {
+				t.Fatal("service factory was called")
+			}
+			if out.Len() != 0 {
+				t.Fatalf("stdout = %q", out.String())
+			}
+		})
 	}
 }
 

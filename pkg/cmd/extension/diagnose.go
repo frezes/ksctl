@@ -7,7 +7,6 @@ import (
 	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
-	kubesphererest "kubesphere.io/client-go/rest"
 )
 
 func newDiagnoseCommand(
@@ -20,17 +19,14 @@ func newDiagnoseCommand(
 		Use:     "diagnose NAME",
 		Short:   "Diagnose KubeSphere extension controller state",
 		Example: parent + " extension diagnose NAME [--target-cluster CLUSTER]",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			if targetCluster != "" {
-				if messages := kubesphererest.IsValidPathSegmentName(
+			if command.Flags().Changed("target-cluster") {
+				if err := validateCommandPathName(
+					"target cluster",
 					targetCluster,
-				); len(messages) != 0 {
-					return fmt.Errorf(
-						"invalid target cluster %q: %v",
-						targetCluster,
-						messages,
-					)
+				); err != nil {
+					return err
 				}
 			}
 			service, err := serviceAfterValidation(factory)

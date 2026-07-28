@@ -78,6 +78,23 @@ func TestLifecycleFlagValidationBeforeFactory(t *testing.T) {
 			want: "none of the others",
 		},
 		{
+			name: "invalid placement cluster",
+			args: []string{
+				"extension", "install", "demo",
+				"--version", "1.2.1",
+				"--clusters", "member-a/b",
+			},
+			want: "invalid cluster",
+		},
+		{
+			name: "empty removed override",
+			args: []string{
+				"extension", "configure", "demo",
+				"--remove-override=",
+			},
+			want: "invalid override cluster",
+		},
+		{
 			name: "wait timeout without wait",
 			args: []string{
 				"extension", "install", "demo",
@@ -295,6 +312,37 @@ func TestUpgradeAndConfigurePassPlanChanges(t *testing.T) {
 			t.Fatalf("stdout = %q", out.String())
 		}
 	})
+
+	t.Run("configure explicit empty placement", func(t *testing.T) {
+		streams, _, _ := bufferedStreams()
+		var got internalextension.PlanChanges
+		service := &fakeService{
+			configureFn: func(
+				_ context.Context,
+				_ string,
+				changes internalextension.PlanChanges,
+			) (internalextension.Operation, error) {
+				got = changes
+				return internalextension.Operation{}, nil
+			},
+		}
+		err := executeExtensionCommand(
+			t,
+			[]string{
+				"extension", "configure", "demo",
+				"--clusters=",
+			},
+			streams,
+			func() (Service, error) { return service, nil },
+		)
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		if got.Scheduling.Mode != internalextension.Replace ||
+			len(got.Scheduling.Clusters) != 0 {
+			t.Fatalf("changes = %#v", got)
+		}
+	})
 }
 
 func TestUninstallIsDirectAndAsyncByDefault(t *testing.T) {
@@ -359,10 +407,13 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 			finalOutput: "extension/demo upgraded\n",
 			service: func(t *testing.T) *fakeService {
 				return &fakeService{upgradeFn: func(
-					context.Context,
-					string,
-					internalextension.UpgradeOptions,
+					_ context.Context,
+					_ string,
+					options internalextension.UpgradeOptions,
 				) (internalextension.Operation, error) {
+					if !options.RequireWaitable {
+						t.Fatal("upgrade did not require waitable placement")
+					}
 					return internalextension.Operation{
 						Kind: internalextension.OperationUpgrade,
 						Name: "demo",
@@ -377,10 +428,13 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 			finalOutput: "extension/demo configured\n",
 			service: func(t *testing.T) *fakeService {
 				return &fakeService{configureFn: func(
-					context.Context,
-					string,
-					internalextension.PlanChanges,
+					_ context.Context,
+					_ string,
+					changes internalextension.PlanChanges,
 				) (internalextension.Operation, error) {
+					if !changes.RequireWaitable {
+						t.Fatal("configure did not require waitable placement")
+					}
 					return internalextension.Operation{
 						Kind: internalextension.OperationConfigure,
 						Name: "demo",

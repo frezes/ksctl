@@ -2,6 +2,7 @@ package extension
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	internalextension "github.com/kubesphere/ksctl/internal/extension"
@@ -85,11 +86,15 @@ func newShowCommand(
 		Use:     "show NAME",
 		Short:   "Show KubeSphere extension details",
 		Example: parent + " extension show NAME [--version VERSION]",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			format, err := parseOutput(output, false)
 			if err != nil {
 				return err
+			}
+			if command.Flags().Changed("version") &&
+				strings.TrimSpace(version) == "" {
+				return fmt.Errorf("--version must be non-empty")
 			}
 			service, err := serviceAfterValidation(factory)
 			if err != nil {
@@ -136,7 +141,7 @@ func newVersionsCommand(
 		Use:     "versions NAME",
 		Short:   "List versions of a KubeSphere extension",
 		Example: parent + " extension versions NAME",
-		Args:    cobra.ExactArgs(1),
+		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			format, err := parseOutput(output, false)
 			if err != nil {
@@ -183,7 +188,7 @@ func newStatusCommand(
 		Use:     "status [NAME]",
 		Short:   "Show KubeSphere extension installation status",
 		Example: parent + " extension status [NAME] [--watch]",
-		Args:    cobra.MaximumNArgs(1),
+		Args:    optionalExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			format, err := parseOutput(output, false)
 			if err != nil {

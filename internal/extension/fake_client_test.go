@@ -15,6 +15,7 @@ type fakeAPIClient struct {
 
 	extensions       List[Extension]
 	versions         map[string]List[ExtensionVersion]
+	versionObjects   map[string]Object[ExtensionVersion]
 	installPlans     List[InstallPlan]
 	extensionObjects map[string]Object[Extension]
 	planObjects      map[string]Object[InstallPlan]
@@ -33,10 +34,11 @@ type fakeAPIClient struct {
 	pods             map[string]PodList
 	podErrs          map[string]error
 
-	createdPlans []InstallPlan
-	patches      [][]byte
-	deletedPlans []string
-	calls        []string
+	createdPlans   []InstallPlan
+	patches        [][]byte
+	deletedPlans   []string
+	deleteVersions []string
+	calls          []string
 }
 
 type fakePlanRead struct {
@@ -49,6 +51,7 @@ func newFakeAPIClient(t testing.TB) *fakeAPIClient {
 	return &fakeAPIClient{
 		t:                t,
 		versions:         map[string]List[ExtensionVersion]{},
+		versionObjects:   map[string]Object[ExtensionVersion]{},
 		extensionObjects: map[string]Object[Extension]{},
 		planObjects:      map[string]Object[InstallPlan]{},
 		getExtensionErrs: map[string]error{},
@@ -169,6 +172,17 @@ func (f *fakeAPIClient) ListExtensionVersions(
 	), nil
 }
 
+func (f *fakeAPIClient) GetExtensionVersion(
+	_ context.Context,
+	name string,
+) (Object[ExtensionVersion], error) {
+	f.calls = append(f.calls, "get extension version "+name)
+	if object, found := f.versionObjects[name]; found {
+		return object, nil
+	}
+	return Object[ExtensionVersion]{}, notFound("extensionversions", name)
+}
+
 func (f *fakeAPIClient) ListInstallPlans(context.Context) (List[InstallPlan], error) {
 	f.calls = append(f.calls, "list install plans")
 	return f.installPlans, nil
@@ -224,9 +238,14 @@ func (f *fakeAPIClient) PatchInstallPlan(
 	return Object[InstallPlan]{}, fmt.Errorf("no patch response for %q", name)
 }
 
-func (f *fakeAPIClient) DeleteInstallPlan(_ context.Context, name string) error {
+func (f *fakeAPIClient) DeleteInstallPlan(
+	_ context.Context,
+	name string,
+	resourceVersion string,
+) error {
 	f.calls = append(f.calls, "delete install plan "+name)
 	f.deletedPlans = append(f.deletedPlans, name)
+	f.deleteVersions = append(f.deleteVersions, resourceVersion)
 	return f.deleteErr
 }
 

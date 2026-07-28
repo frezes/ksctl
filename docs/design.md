@@ -193,19 +193,31 @@ are still read through host `/api/v1` and `/apis/batch/v1` paths.
 Install creates an enabled InstallPlan with `upgradeStrategy: Manual`. Upgrade
 and configure send minimal JSON Merge Patches guarded by the current
 `metadata.resourceVersion`; conflicts are returned instead of retrying changed
-intent. Exact ExtensionVersion values remain opaque, and required dependencies
-are validated without automatic installation.
+intent. Exact ExtensionVersion values remain opaque, but controller-facing
+operations directly require the resource identity `<extension>-<version>`.
+Required dependencies are validated without automatic installation.
 
 Lifecycle writes are asynchronous unless `--wait` is explicit. The waiter
 uses the accepted create or patch response as a target-local baseline, so a
 stale pre-existing terminal status is not attributed to the new operation.
-Host and member targets advance independently; uninstall succeeds only when
-the InstallPlan becomes NotFound.
+Host and member targets advance independently, effective configuration hashes
+match the KubeSphere controller's merge semantics, and removed member failures
+remain actionable. Clearing scheduling uses an explicit empty placement so the
+controller performs member cleanup. Uninstall succeeds only when the
+InstallPlan becomes NotFound. Accepted specs and object identities are fenced
+so a dropped admission change, concurrent mutation, deletion, or same-name
+recreation cannot be reported as the original operation's success.
 
-Diagnosis reports controller state, conditions, dependencies, Namespace, Job,
-Pod terminations, member statuses, and limited timestamp evidence. It suggests
-follow-up `kubectl logs` commands but does not retrieve logs, Secrets, or Helm
-values.
+Diagnosis validates the controller's exact target ExtensionVersion and reports
+controller state, conditions, dependencies, Namespace, Job, Pod terminations,
+member statuses, and limited timestamp evidence. Completed retrying Jobs and
+recovered container history are distinguished from current failures. It
+suggests follow-up `kubectl logs` commands but does not retrieve logs, Secrets,
+or Helm values.
+
+Human-readable extension output escapes terminal control data. Extension
+commands also reject REST debug verbosity `--v=8` and higher because that
+client level may log InstallPlan configuration bodies.
 
 Because `extension` is built in, plugin executables named `ksctl-extension` or
 nested beneath that path cannot override or extend it. Plugin listing reports

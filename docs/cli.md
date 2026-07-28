@@ -213,12 +213,15 @@ ksctl extension status logging --watch --wait-timeout 10m
 ```
 
 JSON and YAML preserve complete server objects, including fields unknown to
-this ksctl release. `status --watch` requires a name and table output.
+this ksctl release. Table output keeps observed `INSTALLED` and requested
+`TARGET` versions separate. `status --watch` requires a name and table output.
 
 ### Install and upgrade exact versions
 
 Install and upgrade require an exact, opaque `--version`; ksctl does not select
-the recommended version or rewrite a `v` prefix:
+the recommended version or rewrite a `v` prefix. The KubeSphere controller
+requires the corresponding ExtensionVersion resource to be named exactly
+`<extension>-<version>`, and ksctl verifies that identity directly:
 
 ```bash
 ksctl extension install logging --version 1.2.1
@@ -282,7 +285,16 @@ ksctl extension configure logging --clear-cluster-scheduling
 
 At most one `--config` or `--override` input may read stdin during one
 invocation. Configuration and overrides must be non-empty, single-document
-YAML.
+YAML mappings with no duplicate keys. Existing retained values are validated
+too. ksctl applies the same per-line trailing-whitespace normalization as the
+KubeSphere InstallPlan admission webhook. Cluster names must be DNS-1123
+subdomains.
+
+With `--wait`, placement replacement waits for new members and removal of old
+member agents. `--clear-cluster-scheduling --wait` likewise waits until all
+previous member statuses disappear. Dynamic selector-only placement cannot be
+tracked deterministically, so `--wait` requires replacing it with
+`--clusters` first.
 
 ### Uninstall and diagnose
 
@@ -308,6 +320,10 @@ Diagnosis never retrieves logs, Secrets, or rendered Helm values. When further
 inspection is useful, it prints a `kubectl logs` command for the user to run.
 Warnings do not fail diagnosis; definite `ERROR` checks produce a non-zero
 exit status after the check table is printed.
+
+Extension commands reject `--v=8` and higher because the underlying
+KubeSphere REST client's debug logging can expose InstallPlan configuration.
+Use `--v=7` or lower.
 
 ## Configuration and credentials
 

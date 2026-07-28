@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	kubesphererest "kubesphere.io/client-go/rest"
 )
 
@@ -16,11 +19,12 @@ type APIClient interface {
 	ListExtensions(context.Context, string) (List[Extension], error)
 	GetExtension(context.Context, string) (Object[Extension], error)
 	ListExtensionVersions(context.Context, string) (List[ExtensionVersion], error)
+	GetExtensionVersion(context.Context, string) (Object[ExtensionVersion], error)
 	ListInstallPlans(context.Context) (List[InstallPlan], error)
 	GetInstallPlan(context.Context, string) (Object[InstallPlan], error)
 	CreateInstallPlan(context.Context, InstallPlan) (Object[InstallPlan], error)
 	PatchInstallPlan(context.Context, string, []byte) (Object[InstallPlan], error)
-	DeleteInstallPlan(context.Context, string) error
+	DeleteInstallPlan(context.Context, string, string) error
 	GetNamespace(context.Context, string) (Namespace, error)
 	GetJob(context.Context, string, string) (Job, error)
 	ListPodsForJob(context.Context, string, string) (PodList, error)
@@ -35,8 +39,25 @@ func NewRESTClient(client kubesphererest.Interface) APIClient {
 }
 
 func validatePathName(kind, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("invalid %s %q: must be non-empty", kind, name)
+	}
 	if messages := kubesphererest.IsValidPathSegmentName(name); len(messages) != 0 {
 		return fmt.Errorf("invalid %s %q: %v", kind, name, messages)
+	}
+	return nil
+}
+
+func validateClusterName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("invalid cluster %q: must be non-empty", name)
+	}
+	if messages := validation.IsDNS1123Subdomain(name); len(messages) != 0 {
+		return fmt.Errorf(
+			"invalid cluster %q: must be a DNS-1123 subdomain: %v",
+			name,
+			messages,
+		)
 	}
 	return nil
 }
@@ -127,6 +148,30 @@ func (c *restClient) ListExtensionVersions(
 	return list, nil
 }
 
+func (c *restClient) GetExtensionVersion(
+	ctx context.Context,
+	name string,
+) (Object[ExtensionVersion], error) {
+	if err := validatePathName("extension version", name); err != nil {
+		return Object[ExtensionVersion]{}, err
+	}
+	raw, err := resultRaw(c.client.Get().
+		AbsPath(extensionAPIPath, "extensionversions", name).
+		Do(ctx))
+	if err != nil {
+		return Object[ExtensionVersion]{}, fmt.Errorf(
+			"get extension version %q: %w",
+			name,
+			err,
+		)
+	}
+	return decodeNamedObject[ExtensionVersion](
+		"extension version",
+		name,
+		raw,
+	)
+}
+
 func (c *restClient) ListInstallPlans(ctx context.Context) (List[InstallPlan], error) {
 	raw, err := resultRaw(c.client.Get().
 		AbsPath(extensionAPIPath, "installplans").
@@ -202,12 +247,37 @@ func (c *restClient) PatchInstallPlan(
 	return decodeNamedObject[InstallPlan]("install plan", name, raw)
 }
 
-func (c *restClient) DeleteInstallPlan(ctx context.Context, name string) error {
+func (c *restClient) DeleteInstallPlan(
+	ctx context.Context,
+	name string,
+	resourceVersion string,
+) error {
 	if err := validatePathName("extension", name); err != nil {
 		return err
 	}
+	if strings.TrimSpace(resourceVersion) == "" {
+		return fmt.Errorf(
+			"delete install plan %q requires metadata.resourceVersion",
+			name,
+		)
+	}
+	options := metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{
+			ResourceVersion: &resourceVersion,
+		},
+	}
+	data, err := json.Marshal(options)
+	if err != nil {
+		return fmt.Errorf(
+			"encode install plan %q delete precondition: %w",
+			name,
+			err,
+		)
+	}
 	result := c.client.Delete().
 		AbsPath(extensionAPIPath, "installplans", name).
+		SetHeader("Content-Type", "application/json").
+		Body(data).
 		Do(ctx)
 	if err := result.Error(); err != nil {
 		return fmt.Errorf("delete install plan %q: %w", name, err)

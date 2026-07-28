@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
+	yaml3 "gopkg.in/yaml.v3"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
@@ -33,13 +35,15 @@ type SchedulingChange struct {
 }
 
 type PlanChanges struct {
-	Config     StringChange
-	Scheduling SchedulingChange
+	Config          StringChange
+	Scheduling      SchedulingChange
+	RequireWaitable bool
 }
 
 type ChangeSummary struct {
 	ConfigChanged     bool
 	SchedulingChanged bool
+	ResultConfig      string
 	ResultScheduling  *ClusterScheduling
 }
 
@@ -48,24 +52,66 @@ func (s ChangeSummary) Changed() bool {
 }
 
 func NormalizeYAML(kind, value string) (string, error) {
-	normalized := strings.TrimRight(value, "\r\n")
-	if strings.TrimSpace(normalized) == "" {
-		return "", fmt.Errorf("%s must be non-empty YAML", kind)
+	lines := strings.Split(strings.TrimRight(value, "\r\n"), "\n")
+	for index := range lines {
+		lines[index] = strings.TrimRightFunc(lines[index], unicode.IsSpace)
+	}
+	normalized := strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	if err := validateYAMLMapping(kind, normalized); err != nil {
+		return "", err
+	}
+	return normalized + "\n", nil
+}
+
+func validateYAMLMapping(kind, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s must be non-empty YAML", kind)
 	}
 
-	decoder := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(normalized), 4096)
+	decoder := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(value), 4096)
 	var first any
 	if err := decoder.Decode(&first); err != nil {
-		return "", fmt.Errorf("invalid %s: %w", kind, err)
+		return fmt.Errorf("invalid %s: %w", kind, err)
 	}
 	var second any
 	if err := decoder.Decode(&second); err != io.EOF {
 		if err == nil {
-			return "", fmt.Errorf("%s must contain exactly one YAML document", kind)
+			return fmt.Errorf("%s must contain exactly one YAML document", kind)
 		}
-		return "", fmt.Errorf("invalid %s: %w", kind, err)
+		return fmt.Errorf("invalid %s: %w", kind, err)
 	}
-	return normalized + "\n", nil
+
+	documentDecoder := yaml3.NewDecoder(strings.NewReader(value))
+	var document yaml3.Node
+	if err := documentDecoder.Decode(&document); err != nil {
+		return fmt.Errorf("invalid %s: %w", kind, err)
+	}
+	if len(document.Content) == 0 {
+		return fmt.Errorf("%s must be non-empty YAML", kind)
+	}
+	root := document.Content[0]
+	if len(document.Content) == 1 &&
+		root.ShortTag() == "!!null" &&
+		root.Value == "" {
+		return fmt.Errorf("%s must be non-empty YAML", kind)
+	}
+	if len(document.Content) != 1 ||
+		root.Kind != yaml3.MappingNode {
+		return fmt.Errorf("%s must contain a top-level YAML mapping", kind)
+	}
+	document = yaml3.Node{}
+	if err := documentDecoder.Decode(&document); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("%s must contain exactly one YAML document", kind)
+		}
+		return fmt.Errorf("invalid %s: %w", kind, err)
+	}
+
+	var mapping map[string]any
+	if err := yaml3.Unmarshal([]byte(value), &mapping); err != nil {
+		return fmt.Errorf("invalid %s: %w", kind, err)
+	}
+	return nil
 }
 
 func NormalizeClusters(values []string) ([]string, error) {
@@ -76,7 +122,7 @@ func NormalizeClusters(values []string) ([]string, error) {
 		if name == "" {
 			return nil, fmt.Errorf("cluster name must be non-empty")
 		}
-		if err := validatePathName("cluster", name); err != nil {
+		if err := validateClusterName(name); err != nil {
 			return nil, err
 		}
 		if _, found := seen[name]; found {
@@ -113,7 +159,7 @@ func BuildInstallScheduling(
 	}
 	normalizedOverrides := make(map[string]string, len(overrides))
 	for _, cluster := range slices.Sorted(maps.Keys(overrides)) {
-		if err := validatePathName("cluster", cluster); err != nil {
+		if err := validateClusterName(cluster); err != nil {
 			return nil, err
 		}
 		if _, found := placed[cluster]; !found {
@@ -145,6 +191,10 @@ func cloneScheduling(value *ClusterScheduling) *ClusterScheduling {
 	if value.Placement != nil {
 		placement := *value.Placement
 		placement.Clusters = slices.Clone(value.Placement.Clusters)
+		if value.Placement.ClusterSelector != nil {
+			placement.ClusterSelector =
+				value.Placement.ClusterSelector.DeepCopy()
+		}
 		copy.Placement = &placement
 	}
 	copy.Overrides = maps.Clone(value.Overrides)
@@ -157,7 +207,7 @@ func BuildSpecPatch(
 	changes PlanChanges,
 ) (map[string]any, ChangeSummary, error) {
 	specPatch := map[string]any{"upgradeStrategy": "Manual"}
-	summary := ChangeSummary{}
+	summary := ChangeSummary{ResultConfig: current.Spec.Config}
 
 	switch changes.Config.Mode {
 	case Keep:
@@ -173,11 +223,13 @@ func BuildSpecPatch(
 			specPatch["config"] = normalized
 			summary.ConfigChanged = true
 		}
+		summary.ResultConfig = normalized
 	case Clear:
 		if current.Spec.Config != "" {
 			specPatch["config"] = nil
 			summary.ConfigChanged = true
 		}
+		summary.ResultConfig = ""
 	default:
 		return nil, ChangeSummary{}, fmt.Errorf(
 			"invalid configuration change mode %d",
@@ -191,7 +243,7 @@ func BuildSpecPatch(
 
 	removeSet := make(map[string]struct{}, len(changes.Scheduling.RemoveOverrides))
 	for _, cluster := range changes.Scheduling.RemoveOverrides {
-		if err := validatePathName("cluster", cluster); err != nil {
+		if err := validateClusterName(cluster); err != nil {
 			return nil, ChangeSummary{}, err
 		}
 		if _, found := changes.Scheduling.SetOverrides[cluster]; found {
@@ -236,7 +288,18 @@ func BuildSpecPatch(
 			"clusterSelector": nil,
 		}
 	case Clear:
-		result = nil
+		if result == nil {
+			result = &ClusterScheduling{}
+		}
+		for _, cluster := range slices.Sorted(maps.Keys(result.Overrides)) {
+			delete(result.Overrides, cluster)
+			overridePatch[cluster] = nil
+		}
+		result.Placement = &Placement{Clusters: []string{}}
+		schedulingPatch["placement"] = map[string]any{
+			"clusters":        []string{},
+			"clusterSelector": nil,
+		}
 	default:
 		return nil, ChangeSummary{}, fmt.Errorf(
 			"invalid scheduling change mode %d",
@@ -252,6 +315,7 @@ func BuildSpecPatch(
 			)
 		}
 		if result.Placement.ClusterSelector != nil &&
+			len(result.Placement.Clusters) == 0 &&
 			changes.Scheduling.Mode != Replace {
 			return nil, ChangeSummary{}, fmt.Errorf(
 				"setting an override with selector-only placement requires --clusters",
@@ -265,7 +329,7 @@ func BuildSpecPatch(
 			result.Overrides = map[string]string{}
 		}
 		for _, cluster := range setNames {
-			if err := validatePathName("cluster", cluster); err != nil {
+			if err := validateClusterName(cluster); err != nil {
 				return nil, ChangeSummary{}, err
 			}
 			if _, found := placed[cluster]; !found {
@@ -298,7 +362,15 @@ func BuildSpecPatch(
 		}
 	}
 
-	if installationMode != "Multicluster" && result != nil {
+	if result != nil && result.Placement == nil {
+		return nil, ChangeSummary{}, fmt.Errorf(
+			"install plan clusterScheduling is missing placement; repair it with --clusters or --clear-cluster-scheduling",
+		)
+	}
+	if err := validateResultConfiguration(summary.ResultConfig, result); err != nil {
+		return nil, ChangeSummary{}, err
+	}
+	if installationMode != "Multicluster" && !schedulingIsCleared(result) {
 		return nil, ChangeSummary{}, fmt.Errorf(
 			"extension version uses %s installation mode and does not accept cluster scheduling",
 			valueOrNone(installationMode),
@@ -321,4 +393,48 @@ func BuildSpecPatch(
 		}
 	}
 	return specPatch, summary, nil
+}
+
+func validateResultConfiguration(
+	config string,
+	scheduling *ClusterScheduling,
+) error {
+	if config != "" {
+		if err := validateYAMLMapping("global configuration", config); err != nil {
+			return err
+		}
+	}
+	if scheduling == nil {
+		return nil
+	}
+	for _, cluster := range slices.Sorted(maps.Keys(scheduling.Overrides)) {
+		value := scheduling.Overrides[cluster]
+		if value == "" {
+			continue
+		}
+		if err := validateYAMLMapping(
+			"override for cluster "+strconv.Quote(cluster),
+			value,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func schedulingIsCleared(value *ClusterScheduling) bool {
+	if value == nil {
+		return true
+	}
+	return value.Placement != nil &&
+		len(value.Placement.Clusters) == 0 &&
+		value.Placement.ClusterSelector == nil &&
+		len(value.Overrides) == 0
+}
+
+func selectorOnlyPlacement(value *ClusterScheduling) bool {
+	return value != nil &&
+		value.Placement != nil &&
+		len(value.Placement.Clusters) == 0 &&
+		value.Placement.ClusterSelector != nil
 }

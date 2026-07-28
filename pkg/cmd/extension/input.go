@@ -9,7 +9,6 @@ import (
 
 	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"github.com/spf13/cobra"
-	kubesphererest "kubesphere.io/client-go/rest"
 )
 
 const maxConfigurationInputBytes = 10 << 20
@@ -84,12 +83,8 @@ func (flags *configurationFlags) load(
 				"--override must use CLUSTER=FILE",
 			)
 		}
-		if messages := kubesphererest.IsValidPathSegmentName(cluster); len(messages) != 0 {
-			return loadedConfiguration{}, fmt.Errorf(
-				"invalid override cluster %q: %v",
-				cluster,
-				messages,
-			)
+		if err := validateCommandPathName("override cluster", cluster); err != nil {
+			return loadedConfiguration{}, err
 		}
 		if _, duplicate := overrideNames[cluster]; duplicate {
 			return loadedConfiguration{}, fmt.Errorf(
@@ -106,16 +101,20 @@ func (flags *configurationFlags) load(
 			stdinConsumers++
 		}
 	}
+	for _, cluster := range flags.clusters {
+		if err := validateCommandPathName(
+			"cluster",
+			strings.TrimSpace(cluster),
+		); err != nil {
+			return loadedConfiguration{}, err
+		}
+	}
 
 	removeNames := make(map[string]struct{}, len(flags.removeOverrides))
 	removeOverrides := make([]string, 0, len(flags.removeOverrides))
 	for _, cluster := range flags.removeOverrides {
-		if messages := kubesphererest.IsValidPathSegmentName(cluster); len(messages) != 0 {
-			return loadedConfiguration{}, fmt.Errorf(
-				"invalid override cluster %q: %v",
-				cluster,
-				messages,
-			)
+		if err := validateCommandPathName("override cluster", cluster); err != nil {
+			return loadedConfiguration{}, err
 		}
 		if _, duplicate := removeNames[cluster]; duplicate {
 			continue
