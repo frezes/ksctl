@@ -20,6 +20,11 @@ type fakeAPIClient struct {
 	planObjects      map[string]Object[InstallPlan]
 	getExtensionErrs map[string]error
 	getPlanErrs      map[string]error
+	createErr        error
+	patchErr         error
+	deleteErr        error
+	createResponse   *Object[InstallPlan]
+	patchResponses   map[string]Object[InstallPlan]
 
 	createdPlans []InstallPlan
 	patches      [][]byte
@@ -36,6 +41,7 @@ func newFakeAPIClient(t testing.TB) *fakeAPIClient {
 		planObjects:      map[string]Object[InstallPlan]{},
 		getExtensionErrs: map[string]error{},
 		getPlanErrs:      map[string]error{},
+		patchResponses:   map[string]Object[InstallPlan]{},
 	}
 }
 
@@ -166,6 +172,12 @@ func (f *fakeAPIClient) CreateInstallPlan(
 ) (Object[InstallPlan], error) {
 	f.calls = append(f.calls, "create install plan "+plan.Metadata.Name)
 	f.createdPlans = append(f.createdPlans, plan)
+	if f.createErr != nil {
+		return Object[InstallPlan]{}, f.createErr
+	}
+	if f.createResponse != nil {
+		return *f.createResponse, nil
+	}
 	return objectForTest(f.t, plan), nil
 }
 
@@ -176,6 +188,12 @@ func (f *fakeAPIClient) PatchInstallPlan(
 ) (Object[InstallPlan], error) {
 	f.calls = append(f.calls, "patch install plan "+name)
 	f.patches = append(f.patches, append([]byte(nil), patch...))
+	if f.patchErr != nil {
+		return Object[InstallPlan]{}, f.patchErr
+	}
+	if object, found := f.patchResponses[name]; found {
+		return object, nil
+	}
 	if object, found := f.planObjects[name]; found {
 		return object, nil
 	}
@@ -185,7 +203,7 @@ func (f *fakeAPIClient) PatchInstallPlan(
 func (f *fakeAPIClient) DeleteInstallPlan(_ context.Context, name string) error {
 	f.calls = append(f.calls, "delete install plan "+name)
 	f.deletedPlans = append(f.deletedPlans, name)
-	return nil
+	return f.deleteErr
 }
 
 func (f *fakeAPIClient) GetJob(context.Context, string, string) (Job, error) {
