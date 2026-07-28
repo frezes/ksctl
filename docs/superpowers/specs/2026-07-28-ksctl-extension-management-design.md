@@ -192,6 +192,22 @@ sorted by extension name.
 `show NAME` displays extension metadata, available and installed versions,
 state, conditions, provider information, and descriptions.
 
+The default field order for an Extension is:
+
+```text
+Name
+Display Name
+Description
+Category
+Provider
+State
+Enabled
+Installed Version
+Recommended Version
+Versions
+Conditions
+```
+
 `show NAME --version VERSION` displays exact version details, including:
 
 - chart location;
@@ -199,6 +215,21 @@ state, conditions, provider information, and descriptions.
 - installation mode;
 - KubeSphere and Kubernetes version constraints; and
 - external dependencies.
+
+The default field order for an ExtensionVersion is:
+
+```text
+Name
+Extension
+Version
+Category
+Installation Mode
+Namespace
+KubeSphere Version
+Kubernetes Version
+Chart URL
+Dependencies
+```
 
 JSON and YAML output return the complete selected server object.
 
@@ -230,6 +261,8 @@ NAME  VERSION  ENABLED  STATE  NAMESPACE  JOB
 `status NAME --watch` polls for the named InstallPlan and prints only state
 changes. `--watch` requires a name. It uses `--wait-timeout`, whose default is
 `10m`. Explicitly supplying `--wait-timeout` without `--watch` is an error.
+Watch output prints `STATE  NAMESPACE  JOB` once, followed by one row for the
+initial state and each distinct subsequent state.
 
 JSON and YAML output preserve the complete InstallPlan object. Structured
 output is incompatible with `--watch`.
@@ -275,6 +308,12 @@ For upgrade and configure:
 - `--remove-override CLUSTER` removes one override;
 - `--clear-config` removes `spec.config`; and
 - `--clear-cluster-scheduling` removes placement and all overrides.
+
+When the current placement uses only `clusterSelector`, ksctl cannot prove
+that a new `--override` target belongs to the selected set. Setting an
+override in that state therefore requires `--clusters` in the same invocation
+to replace the selector with an explicit Cluster list. Removing an existing
+override does not require replacing the selector.
 
 Positive and clearing flags for the same field are mutually exclusive.
 `--clear-cluster-scheduling` is incompatible with cluster and override flags.
@@ -333,8 +372,13 @@ A same-version request returns an error directing the user to
 `extension configure`, even if configuration flags were also supplied.
 
 Upgrade rejects an InstallPlan that is being deleted or is currently
-`Installing`, `Upgrading`, or `Uninstalling`. It may recover an
-`InstallFailed` or `UpgradeFailed` plan by submitting a new version.
+`Installing`, `Upgrading`, or `Uninstalling`.
+
+The KubeSphere controller does not retry a host `InstallFailed` or
+`UpgradeFailed` plan for a version-only change. Upgrading either failed state
+therefore requires `--config` or `--clear-config` to produce a real change to
+the global `spec.config`; otherwise ksctl rejects the request before writing
+and explains that corrected global configuration is required.
 
 The update includes the current `metadata.resourceVersion` as a concurrency
 precondition. A conflict is returned to the user rather than retried against
@@ -359,9 +403,11 @@ configuration, enforces `upgradeStrategy: Manual`, and applies a
 resourceVersion-guarded JSON Merge Patch.
 
 Configure rejects an InstallPlan that is being deleted or is currently
-`Installing`, `Upgrading`, or `Uninstalling`. It may update an
-`InstallFailed` or `UpgradeFailed` plan so corrected configuration can be
-reconciled.
+`Installing`, `Upgrading`, or `Uninstalling`. For a host `InstallFailed` or
+`UpgradeFailed` plan, configure requires `--config` or `--clear-config` to
+produce a real change to the global `spec.config`; scheduling-only and
+same-value configuration requests cannot make the controller retry that
+failure and are rejected before writing.
 
 Configure returns after the patch by default or waits when `--wait` is present.
 
@@ -432,6 +478,21 @@ Wait uses Context-aware polling. It emits state transitions to stderr and
 writes the final success line to stdout. It does not emit the asynchronous
 `requested` line when waiting.
 
+Each distinct transition uses:
+
+```text
+extension/<name> state: <state>
+```
+
+An empty state is rendered as `<pending>`. Final success uses exactly one of:
+
+```text
+extension/<name> installed
+extension/<name> upgraded
+extension/<name> configured
+extension/<name> uninstalled
+```
+
 Known successful terminal states are `Installed`, `Upgraded`, and deletion
 NotFound as appropriate. Any state whose name ends in `Failed` is terminal
 failure. Empty or unknown non-failure states continue until success, failure,
@@ -451,6 +512,16 @@ available.
 ## Diagnosis
 
 `extension diagnose NAME` produces a check table without reading logs.
+
+The table header is:
+
+```text
+CHECK  STATUS  MESSAGE
+```
+
+Status values are `OK`, `INFO`, `WARN`, and `ERROR`. Check names are stable
+resource identities such as `extension`, `version`, `install-plan`,
+`dependency/<name>`, `job`, `pod/<name>`, `cluster/<name>`, and `clock`.
 
 Checks cover:
 
@@ -599,6 +670,10 @@ Fake client tests cover:
 - config preservation, replacement, and clearing;
 - placement replacement and stale override removal;
 - individual override set and removal;
+- selector-only placement requiring explicit clusters before adding an
+  override;
+- failed host plans requiring a real global configuration change before
+  upgrade or configure;
 - resourceVersion conflicts;
 - async success;
 - install, upgrade, configure, and uninstall wait state sequences;
