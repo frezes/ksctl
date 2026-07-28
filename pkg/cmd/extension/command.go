@@ -100,40 +100,6 @@ func serviceAfterValidation(factory ServiceFactory) (Service, error) {
 	return service, nil
 }
 
-// These constructors are replaced by their complete implementations in the
-// lifecycle and diagnosis command files.
-func newInstallCommand(
-	_ string,
-	_ genericiooptions.IOStreams,
-	_ ServiceFactory,
-) *cobra.Command {
-	return pendingCommand("install NAME")
-}
-
-func newUpgradeCommand(
-	_ string,
-	_ genericiooptions.IOStreams,
-	_ ServiceFactory,
-) *cobra.Command {
-	return pendingCommand("upgrade NAME")
-}
-
-func newConfigureCommand(
-	_ string,
-	_ genericiooptions.IOStreams,
-	_ ServiceFactory,
-) *cobra.Command {
-	return pendingCommand("configure NAME")
-}
-
-func newUninstallCommand(
-	_ string,
-	_ genericiooptions.IOStreams,
-	_ ServiceFactory,
-) *cobra.Command {
-	return pendingCommand("uninstall NAME")
-}
-
 func newDiagnoseCommand(
 	_ string,
 	_ genericiooptions.IOStreams,
