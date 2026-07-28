@@ -26,6 +26,12 @@ type fakeAPIClient struct {
 	createResponse   *Object[InstallPlan]
 	patchResponses   map[string]Object[InstallPlan]
 	planReads        map[string][]fakePlanRead
+	namespaces       map[string]Namespace
+	namespaceErrs    map[string]error
+	jobs             map[string]Job
+	jobErrs          map[string]error
+	pods             map[string]PodList
+	podErrs          map[string]error
 
 	createdPlans []InstallPlan
 	patches      [][]byte
@@ -49,6 +55,12 @@ func newFakeAPIClient(t testing.TB) *fakeAPIClient {
 		getPlanErrs:      map[string]error{},
 		patchResponses:   map[string]Object[InstallPlan]{},
 		planReads:        map[string][]fakePlanRead{},
+		namespaces:       map[string]Namespace{},
+		namespaceErrs:    map[string]error{},
+		jobs:             map[string]Job{},
+		jobErrs:          map[string]error{},
+		pods:             map[string]PodList{},
+		podErrs:          map[string]error{},
 	}
 }
 
@@ -218,12 +230,42 @@ func (f *fakeAPIClient) DeleteInstallPlan(_ context.Context, name string) error 
 	return f.deleteErr
 }
 
-func (f *fakeAPIClient) GetJob(context.Context, string, string) (Job, error) {
-	f.t.Helper()
-	return Job{}, fmt.Errorf("unexpected GetJob call")
+func (f *fakeAPIClient) GetNamespace(_ context.Context, name string) (Namespace, error) {
+	f.calls = append(f.calls, "get namespace "+name)
+	if err := f.namespaceErrs[name]; err != nil {
+		return Namespace{}, err
+	}
+	if namespace, found := f.namespaces[name]; found {
+		return namespace, nil
+	}
+	return Namespace{}, notFound("namespaces", name)
 }
 
-func (f *fakeAPIClient) ListPodsForJob(context.Context, string, string) (PodList, error) {
-	f.t.Helper()
-	return PodList{}, fmt.Errorf("unexpected ListPodsForJob call")
+func (f *fakeAPIClient) GetJob(
+	_ context.Context,
+	namespace string,
+	name string,
+) (Job, error) {
+	key := namespace + "/" + name
+	f.calls = append(f.calls, "get job "+key)
+	if err := f.jobErrs[key]; err != nil {
+		return Job{}, err
+	}
+	if job, found := f.jobs[key]; found {
+		return job, nil
+	}
+	return Job{}, notFound("jobs", name)
+}
+
+func (f *fakeAPIClient) ListPodsForJob(
+	_ context.Context,
+	namespace string,
+	job string,
+) (PodList, error) {
+	key := namespace + "/" + job
+	f.calls = append(f.calls, "list pods "+key)
+	if err := f.podErrs[key]; err != nil {
+		return PodList{}, err
+	}
+	return f.pods[key], nil
 }

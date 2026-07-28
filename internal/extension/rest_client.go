@@ -21,6 +21,7 @@ type APIClient interface {
 	CreateInstallPlan(context.Context, InstallPlan) (Object[InstallPlan], error)
 	PatchInstallPlan(context.Context, string, []byte) (Object[InstallPlan], error)
 	DeleteInstallPlan(context.Context, string) error
+	GetNamespace(context.Context, string) (Namespace, error)
 	GetJob(context.Context, string, string) (Job, error)
 	ListPodsForJob(context.Context, string, string) (PodList, error)
 }
@@ -212,6 +213,23 @@ func (c *restClient) DeleteInstallPlan(ctx context.Context, name string) error {
 		return fmt.Errorf("delete install plan %q: %w", name, err)
 	}
 	return nil
+}
+
+func (c *restClient) GetNamespace(ctx context.Context, name string) (Namespace, error) {
+	if err := validatePathName("namespace", name); err != nil {
+		return Namespace{}, err
+	}
+	raw, err := resultRaw(c.client.Get().
+		AbsPath("/api/v1/namespaces", name).
+		Do(ctx))
+	if err != nil {
+		return Namespace{}, fmt.Errorf("get namespace %q: %w", name, err)
+	}
+	var namespace Namespace
+	if err := json.Unmarshal(raw, &namespace); err != nil {
+		return Namespace{}, fmt.Errorf("decode namespace %q: %w", name, err)
+	}
+	return namespace, nil
 }
 
 func (c *restClient) GetJob(ctx context.Context, namespace, name string) (Job, error) {

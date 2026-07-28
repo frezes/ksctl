@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -167,11 +168,13 @@ func TestRESTClientInstallPlanCRUD(t *testing.T) {
 	}
 }
 
-func TestRESTClientReadsExecutorWorkloadsFromHost(t *testing.T) {
+func TestRESTClientNeverUsesMemberClusterForExecutorWorkloads(t *testing.T) {
 	var paths []string
 	client := newTestAPIClient(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		paths = append(paths, request.URL.RequestURI())
 		switch request.URL.Path {
+		case "/api/v1/namespaces/demo-system":
+			writeJSONResponse(t, response, `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"demo-system"}}`)
 		case "/apis/batch/v1/namespaces/demo-system/jobs/install-demo":
 			writeJSONResponse(t, response, `{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"install-demo","namespace":"demo-system"}}`)
 		case "/api/v1/namespaces/demo-system/pods":
@@ -181,13 +184,21 @@ func TestRESTClientReadsExecutorWorkloadsFromHost(t *testing.T) {
 		}
 	}), nil)
 
+	if _, err := client.GetNamespace(context.Background(), "demo-system"); err != nil {
+		t.Fatalf("GetNamespace() error = %v", err)
+	}
 	if _, err := client.GetJob(context.Background(), "demo-system", "install-demo"); err != nil {
 		t.Fatalf("GetJob() error = %v", err)
 	}
 	if _, err := client.ListPodsForJob(context.Background(), "demo-system", "install-demo"); err != nil {
 		t.Fatalf("ListPodsForJob() error = %v", err)
 	}
-	if len(paths) != 2 || paths[1] != "/api/v1/namespaces/demo-system/pods?labelSelector=job-name%3Dinstall-demo" {
+	want := []string{
+		"/api/v1/namespaces/demo-system",
+		"/apis/batch/v1/namespaces/demo-system/jobs/install-demo",
+		"/api/v1/namespaces/demo-system/pods?labelSelector=job-name%3Dinstall-demo",
+	}
+	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("paths = %v", paths)
 	}
 	for _, path := range paths {
