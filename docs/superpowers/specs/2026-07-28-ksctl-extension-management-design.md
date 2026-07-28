@@ -121,8 +121,8 @@ An explicitly supplied root `--cluster` flag is rejected before a request is
 made. The error explains that:
 
 - `--clusters` selects multicluster extension placement; and
-- `extension diagnose --target-cluster` selects a member Cluster for remote
-  Job and Pod inspection.
+- `extension diagnose --target-cluster` selects a member Cluster status while
+  executor Job and Pod inspection remains on the host.
 
 An explicitly supplied root `--namespace` or `-n` flag is also rejected because
 Extension, ExtensionVersion, and InstallPlan are Cluster-scoped resources.
@@ -257,6 +257,11 @@ Default columns:
 ```text
 NAME  VERSION  ENABLED  STATE  NAMESPACE  JOB
 ```
+
+Named table output prints the host row first, followed by
+`NAME/<cluster>` rows in Cluster-name order for every
+`status.clusterSchedulingStatuses` entry. Cluster rows render unavailable
+enabled values as `<none>`.
 
 `status NAME --watch` polls for the named InstallPlan and prints only state
 changes. `--watch` requires a name. It uses `--wait-timeout`, whose default is
