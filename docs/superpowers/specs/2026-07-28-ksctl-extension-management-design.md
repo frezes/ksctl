@@ -128,8 +128,10 @@ An explicitly supplied root `--namespace` or `-n` flag is also rejected because
 Extension, ExtensionVersion, and InstallPlan are Cluster-scoped resources.
 
 When diagnosis explicitly names a target Cluster, the internal client applies
-that Cluster to only the Kubernetes Job and Pod inspection requests. Extension
-management requests remain host-scoped.
+that Cluster only to select the matching
+`status.clusterSchedulingStatuses[cluster]` entry. The extension controller
+creates executor Jobs and Pods on the host and passes the member kubeconfig to
+the Job as Helm input, so Job and Pod inspection remains host-scoped.
 
 ## Resource Identity and Version Selection
 
@@ -471,9 +473,10 @@ extension:
 --target-cluster CLUSTER
 ```
 
-selects one member Cluster's scheduling status and performs remote Job and Pod
-inspection through `/clusters/<cluster>`. The target must appear in the
-InstallPlan's cluster scheduling statuses.
+selects one member Cluster's scheduling status and inspects the corresponding
+Job and Pods on the host. The target must appear in the
+InstallPlan's cluster scheduling statuses. ksctl does not query the member
+Cluster for executor Jobs or Pods.
 
 Clock skew is reported only as a possible cause when the evidence matches the
 documented symptom, such as a completed Job whose InstallPlan remains in a
@@ -577,7 +580,7 @@ Tests are written and observed failing before production changes.
 - resourceVersion-guarded Merge Patch bodies;
 - delete behavior;
 - host scope despite a Context default Cluster;
-- explicit target-Cluster routing for diagnosis only;
+- host Job and Pod routing even when diagnosis selects a target Cluster;
 - bearer token and user-agent propagation;
 - non-2xx Kubernetes Status responses;
 - malformed JSON and missing required response identity;
