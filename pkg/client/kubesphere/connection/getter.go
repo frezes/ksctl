@@ -14,14 +14,16 @@ import (
 )
 
 type Dependencies struct {
-	TokenProvider auth.TokenProvider
-	Transport     http.RoundTripper
+	TokenProvider        auth.TokenProvider
+	Transport            http.RoundTripper
+	IgnoreDefaultCluster bool
 }
 
 type RESTClientGetter struct {
-	options       *clientoptions.Options
-	tokenProvider auth.TokenProvider
-	transport     http.RoundTripper
+	options              *clientoptions.Options
+	tokenProvider        auth.TokenProvider
+	transport            http.RoundTripper
+	ignoreDefaultCluster bool
 
 	configOnce      sync.Once
 	restConfig      *kubesphererest.Config
@@ -42,9 +44,10 @@ func NewRESTClientGetter(options *clientoptions.Options, dependencies Dependenci
 		provider = auth.NewProvider(auth.ProviderOptions{})
 	}
 	return &RESTClientGetter{
-		options:       options,
-		tokenProvider: provider,
-		transport:     dependencies.Transport,
+		options:              options,
+		tokenProvider:        provider,
+		transport:            dependencies.Transport,
+		ignoreDefaultCluster: dependencies.IgnoreDefaultCluster,
 	}
 }
 
@@ -117,6 +120,9 @@ func (g *RESTClientGetter) loadConfig() {
 		if err != nil {
 			g.configErr = err
 			return
+		}
+		if g.ignoreDefaultCluster && g.options.Cluster == "" {
+			resolved.Cluster = ""
 		}
 		g.resolvedCluster = resolved.Cluster
 		if resolved.Cluster != "" {

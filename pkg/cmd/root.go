@@ -81,7 +81,8 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 	cmd.PersistentFlags().StringVar(&connection.RequestTimeout, "request-timeout", "0", "The length of time to wait before giving up on a single server request")
 	addKlogVerbosityFlag(cmd, streams.ErrOut)
 
-	oauth := auth.NewOAuth(clientkubesphere.NewRESTClientFactory(nil))
+	kubeSphereFactory := clientkubesphere.NewRESTClientFactory(nil)
+	oauth := auth.NewOAuth(kubeSphereFactory)
 	provider := auth.NewProvider(auth.ProviderOptions{Requester: oauth})
 	kubernetesGetter := clientkubernetes.NewRESTClientGetter(connection, clientkubernetes.Dependencies{
 		TokenProvider: provider,
@@ -89,10 +90,23 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 	kubeSphereGetter := clientkubesphereconnection.NewRESTClientGetter(connection, clientkubesphereconnection.Dependencies{
 		TokenProvider: provider,
 	})
+	extensionGetter := clientkubesphereconnection.NewRESTClientGetter(
+		connection,
+		clientkubesphereconnection.Dependencies{
+			TokenProvider:        provider,
+			IgnoreDefaultCluster: true,
+		},
+	)
 
 	cmd.AddCommand(newVersionCommand(info, kubernetesGetter))
 	cmd.AddCommand(newConfigCommand(kubeSphereGetter))
 	cmd.AddCommand(newAuthCommand(connection.UserAgent, oauth, kubeSphereGetter))
+	cmd.AddCommand(newExtensionCommand(
+		cmd.DisplayName(),
+		streams,
+		extensionGetter,
+		kubeSphereFactory,
+	))
 
 	factory := cmdutil.NewFactory(kubernetesGetter)
 	kubeStreams := genericiooptions.IOStreams{

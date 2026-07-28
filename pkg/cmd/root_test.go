@@ -239,6 +239,79 @@ func TestRootRegistersPluginListCommand(t *testing.T) {
 	}
 }
 
+func TestRootRegistersExtensionCommandsForBothEntrypoints(t *testing.T) {
+	for _, root := range []*cobra.Command{
+		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+	} {
+		extension := findSubcommand(root, "extension")
+		if extension == nil {
+			t.Fatalf("%s does not register extension", root.DisplayName())
+		}
+		for _, name := range []string{
+			"list",
+			"show",
+			"versions",
+			"status",
+			"install",
+			"upgrade",
+			"configure",
+			"uninstall",
+			"diagnose",
+		} {
+			if findSubcommand(extension, name) == nil {
+				t.Fatalf(
+					"%s extension does not register %s",
+					root.DisplayName(),
+					name,
+				)
+			}
+		}
+		if findSubcommand(extension, "logs") != nil {
+			t.Fatalf("%s extension unexpectedly registers logs", root.DisplayName())
+		}
+	}
+}
+
+func TestExtensionHelpUsesEntrypointDisplayName(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		root *cobra.Command
+		want string
+	}{
+		{
+			name: "standalone",
+			root: NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+			want: "ksctl extension install",
+		},
+		{
+			name: "kubectl plugin",
+			root: NewKubectlPluginCommand(
+				IOStreams{},
+				VersionInfo{Version: "dev"},
+			),
+			want: "kubectl ks extension install",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			test.root.SetOut(&output)
+			test.root.SetErr(&output)
+			test.root.SetArgs([]string{
+				"extension",
+				"install",
+				"--help",
+			})
+			if err := test.root.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if !strings.Contains(output.String(), test.want) {
+				t.Fatalf("help = %q, want %q", output.String(), test.want)
+			}
+		})
+	}
+}
+
 func TestPluginHelpUsesEntrypointDisplayName(t *testing.T) {
 	for _, test := range []struct {
 		name string

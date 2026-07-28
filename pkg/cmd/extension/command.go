@@ -99,21 +99,3 @@ func serviceAfterValidation(factory ServiceFactory) (Service, error) {
 	}
 	return service, nil
 }
-
-func newDiagnoseCommand(
-	_ string,
-	_ genericiooptions.IOStreams,
-	_ ServiceFactory,
-) *cobra.Command {
-	return pendingCommand("diagnose NAME")
-}
-
-func pendingCommand(use string) *cobra.Command {
-	return &cobra.Command{
-		Use:  use,
-		Args: cobra.ExactArgs(1),
-		RunE: func(*cobra.Command, []string) error {
-			return fmt.Errorf("extension command is not available")
-		},
-	}
-}
