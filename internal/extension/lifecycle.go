@@ -23,6 +23,7 @@ type Operation struct {
 	Name          string
 	TargetVersion string
 	Baseline      Object[InstallPlan]
+	expectation   waitExpectation
 }
 
 type InstallOptions struct {
@@ -105,6 +106,11 @@ func (s *Service) Install(
 		Name:          name,
 		TargetVersion: options.Version,
 		Baseline:      created,
+		expectation: installWaitExpectation(
+			created.Value,
+			options.Version,
+			scheduling,
+		),
 	}, nil
 }
 
@@ -178,6 +184,11 @@ func (s *Service) Upgrade(
 		Name:          name,
 		TargetVersion: options.Version,
 		Baseline:      updated,
+		expectation: upgradeWaitExpectation(
+			updated.Value,
+			options.Version,
+			summary.ResultScheduling,
+		),
 	}, nil
 }
 
@@ -246,6 +257,13 @@ func (s *Service) Configure(
 		Name:          name,
 		TargetVersion: current.Value.Spec.Extension.Version,
 		Baseline:      updated,
+		expectation: configureWaitExpectation(
+			current.Value,
+			updated.Value,
+			current.Value.Spec.Extension.Version,
+			changes,
+			summary,
+		),
 	}, nil
 }
 

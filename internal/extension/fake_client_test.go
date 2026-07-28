@@ -25,11 +25,17 @@ type fakeAPIClient struct {
 	deleteErr        error
 	createResponse   *Object[InstallPlan]
 	patchResponses   map[string]Object[InstallPlan]
+	planReads        map[string][]fakePlanRead
 
 	createdPlans []InstallPlan
 	patches      [][]byte
 	deletedPlans []string
 	calls        []string
+}
+
+type fakePlanRead struct {
+	object Object[InstallPlan]
+	err    error
 }
 
 func newFakeAPIClient(t testing.TB) *fakeAPIClient {
@@ -42,6 +48,7 @@ func newFakeAPIClient(t testing.TB) *fakeAPIClient {
 		getExtensionErrs: map[string]error{},
 		getPlanErrs:      map[string]error{},
 		patchResponses:   map[string]Object[InstallPlan]{},
+		planReads:        map[string][]fakePlanRead{},
 	}
 }
 
@@ -157,6 +164,11 @@ func (f *fakeAPIClient) ListInstallPlans(context.Context) (List[InstallPlan], er
 
 func (f *fakeAPIClient) GetInstallPlan(_ context.Context, name string) (Object[InstallPlan], error) {
 	f.calls = append(f.calls, "get install plan "+name)
+	if reads := f.planReads[name]; len(reads) != 0 {
+		read := reads[0]
+		f.planReads[name] = reads[1:]
+		return read.object, read.err
+	}
 	if err := f.getPlanErrs[name]; err != nil {
 		return Object[InstallPlan]{}, err
 	}

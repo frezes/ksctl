@@ -471,3 +471,257 @@ func TestServiceUninstallMissingReturnsNotFound(t *testing.T) {
 		t.Fatalf("deleted plans = %v", client.deletedPlans)
 	}
 }
+
+func TestLifecycleOperationsBuildTargetLocalWaitExpectations(t *testing.T) {
+	t.Run("install host and explicit clusters", func(t *testing.T) {
+		client := newFakeAPIClient(t)
+		prepareExtensionForLifecycle(
+			t,
+			client,
+			"demo",
+			lifecycleVersion("demo", "1.2.1", "Multicluster"),
+		)
+
+		operation, err := NewService(client).Install(
+			context.Background(),
+			"demo",
+			InstallOptions{
+				Version:  "1.2.1",
+				Clusters: []string{"member-a"},
+			},
+		)
+		if err != nil {
+			t.Fatalf("Install() error = %v", err)
+		}
+		if operation.expectation.Host == nil ||
+			operation.expectation.Host.Version != "1.2.1" ||
+			!operation.expectation.Host.MustAdvance {
+			t.Fatalf("host expectation = %#v", operation.expectation.Host)
+		}
+		target, found := operation.expectation.Clusters["member-a"]
+		if !found || target.Version != "1.2.1" || !target.MustAdvance {
+			t.Fatalf("cluster expectations = %#v", operation.expectation.Clusters)
+		}
+	})
+
+	t.Run("upgrade resulting clusters", func(t *testing.T) {
+		client := newFakeAPIClient(t)
+		current := planForTest("demo", "1.2.0", "Installed")
+		current.Spec.ClusterScheduling = &ClusterScheduling{
+			Placement: &Placement{Clusters: []string{"member-a"}},
+		}
+		current.Status.ClusterSchedulingStatuses = map[string]InstallationStatus{
+			"member-a": {
+				State:   "Installed",
+				Version: "1.2.0",
+			},
+		}
+		client.planObjects["demo"] = objectForTest(t, current)
+		prepareExtensionForLifecycle(
+			t,
+			client,
+			"demo",
+			lifecycleVersion("demo", "1.2.1", "Multicluster"),
+		)
+		client.patchResponses["demo"] = objectForTest(t, current)
+
+		operation, err := NewService(client).Upgrade(
+			context.Background(),
+			"demo",
+			UpgradeOptions{Version: "1.2.1"},
+		)
+		if err != nil {
+			t.Fatalf("Upgrade() error = %v", err)
+		}
+		if operation.expectation.Host == nil ||
+			operation.expectation.Host.Version != "1.2.1" {
+			t.Fatalf("host expectation = %#v", operation.expectation.Host)
+		}
+		if target, found := operation.expectation.Clusters["member-a"]; !found ||
+			target.Version != "1.2.1" {
+			t.Fatalf("cluster expectations = %#v", operation.expectation.Clusters)
+		}
+	})
+
+	t.Run("upgrade selector uses current cluster statuses", func(t *testing.T) {
+		client := newFakeAPIClient(t)
+		current := planForTest("demo", "1.2.0", "Installed")
+		current.Spec.ClusterScheduling = &ClusterScheduling{
+			Placement: &Placement{
+				ClusterSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"environment": "production"},
+				},
+			},
+		}
+		current.Status.ClusterSchedulingStatuses = map[string]InstallationStatus{
+			"member-a": {State: "Installed", Version: "1.2.0"},
+			"member-b": {State: "Installed", Version: "1.2.0"},
+		}
+		client.planObjects["demo"] = objectForTest(t, current)
+		prepareExtensionForLifecycle(
+			t,
+			client,
+			"demo",
+			lifecycleVersion("demo", "1.2.1", "Multicluster"),
+		)
+		client.patchResponses["demo"] = objectForTest(t, current)
+
+		operation, err := NewService(client).Upgrade(
+			context.Background(),
+			"demo",
+			UpgradeOptions{Version: "1.2.1"},
+		)
+		if err != nil {
+			t.Fatalf("Upgrade() error = %v", err)
+		}
+		for _, cluster := range []string{"member-a", "member-b"} {
+			if target, found := operation.expectation.Clusters[cluster]; !found ||
+				target.Version != "1.2.1" {
+				t.Fatalf(
+					"cluster expectations = %#v",
+					operation.expectation.Clusters,
+				)
+			}
+		}
+	})
+
+	t.Run("configure global config targets host and known clusters", func(t *testing.T) {
+		client := newFakeAPIClient(t)
+		current := planForTest("demo", "1.2.1", "Installed")
+		current.Spec.Config = "key: old\n"
+		current.Spec.ClusterScheduling = &ClusterScheduling{
+			Placement: &Placement{Clusters: []string{"member-a"}},
+		}
+		current.Status.ConfigHash = "host-old"
+		current.Status.ClusterSchedulingStatuses = map[string]InstallationStatus{
+			"member-a": {
+				State:      "Installed",
+				Version:    "1.2.1",
+				ConfigHash: "member-old",
+			},
+		}
+		client.planObjects["demo"] = objectForTest(t, current)
+		prepareExtensionForLifecycle(
+			t,
+			client,
+			"demo",
+			lifecycleVersion("demo", "1.2.1", "Multicluster"),
+		)
+		client.patchResponses["demo"] = objectForTest(t, current)
+
+		operation, err := NewService(client).Configure(
+			context.Background(),
+			"demo",
+			PlanChanges{
+				Config: StringChange{Mode: Replace, Value: "key: new\n"},
+			},
+		)
+		if err != nil {
+			t.Fatalf("Configure() error = %v", err)
+		}
+		if operation.expectation.Host == nil ||
+			operation.expectation.Host.ConfigHash != "host-old" ||
+			!operation.expectation.Host.requireConfigHashChange {
+			t.Fatalf("host expectation = %#v", operation.expectation.Host)
+		}
+		target, found := operation.expectation.Clusters["member-a"]
+		if !found || target.ConfigHash != "member-old" ||
+			!target.requireConfigHashChange {
+			t.Fatalf("cluster expectations = %#v", operation.expectation.Clusters)
+		}
+	})
+
+	t.Run("configure placement targets retained and added then removes stale", func(t *testing.T) {
+		client := newFakeAPIClient(t)
+		current := planForTest("demo", "1.2.1", "Installed")
+		current.Spec.ClusterScheduling = &ClusterScheduling{
+			Placement: &Placement{Clusters: []string{"member-a", "member-b"}},
+			Overrides: map[string]string{
+				"member-b": "key: old\n",
+			},
+		}
+		current.Status.ClusterSchedulingStatuses = map[string]InstallationStatus{
+			"member-a": {
+				State:   "Installed",
+				Version: "1.2.1",
+			},
+			"member-b": {
+				State:   "Installed",
+				Version: "1.2.1",
+			},
+		}
+		client.planObjects["demo"] = objectForTest(t, current)
+		prepareExtensionForLifecycle(
+			t,
+			client,
+			"demo",
+			lifecycleVersion("demo", "1.2.1", "Multicluster"),
+		)
+		client.patchResponses["demo"] = objectForTest(t, current)
+
+		operation, err := NewService(client).Configure(
+			context.Background(),
+			"demo",
+			PlanChanges{
+				Scheduling: SchedulingChange{
+					Mode:     Replace,
+					Clusters: []string{"member-a", "member-c"},
+				},
+			},
+		)
+		if err != nil {
+			t.Fatalf("Configure() error = %v", err)
+		}
+		if operation.expectation.Host != nil {
+			t.Fatalf("host expectation = %#v", operation.expectation.Host)
+		}
+		if _, found := operation.expectation.Clusters["member-a"]; !found {
+			t.Fatalf("cluster expectations = %#v", operation.expectation.Clusters)
+		}
+		if _, found := operation.expectation.Clusters["member-c"]; !found {
+			t.Fatalf("cluster expectations = %#v", operation.expectation.Clusters)
+		}
+		if _, found := operation.expectation.RemovedClusters["member-b"]; !found {
+			t.Fatalf("removed clusters = %#v", operation.expectation.RemovedClusters)
+		}
+	})
+
+	t.Run("configure clear scheduling waits for all old statuses to disappear", func(t *testing.T) {
+		client := newFakeAPIClient(t)
+		current := planForTest("demo", "1.2.1", "Installed")
+		current.Spec.ClusterScheduling = &ClusterScheduling{
+			Placement: &Placement{Clusters: []string{"member-a", "member-b"}},
+		}
+		current.Status.ClusterSchedulingStatuses = map[string]InstallationStatus{
+			"member-a": {State: "Installed", Version: "1.2.1"},
+			"member-b": {State: "Installed", Version: "1.2.1"},
+		}
+		client.planObjects["demo"] = objectForTest(t, current)
+		prepareExtensionForLifecycle(
+			t,
+			client,
+			"demo",
+			lifecycleVersion("demo", "1.2.1", "Multicluster"),
+		)
+		client.patchResponses["demo"] = objectForTest(t, current)
+
+		operation, err := NewService(client).Configure(
+			context.Background(),
+			"demo",
+			PlanChanges{
+				Scheduling: SchedulingChange{Mode: Clear},
+			},
+		)
+		if err != nil {
+			t.Fatalf("Configure() error = %v", err)
+		}
+		if len(operation.expectation.Clusters) != 0 {
+			t.Fatalf("cluster expectations = %#v", operation.expectation.Clusters)
+		}
+		for _, cluster := range []string{"member-a", "member-b"} {
+			if _, found := operation.expectation.RemovedClusters[cluster]; !found {
+				t.Fatalf("removed clusters = %#v", operation.expectation.RemovedClusters)
+			}
+		}
+	})
+}
