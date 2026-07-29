@@ -3,7 +3,6 @@ package cmd
 import (
 	"flag"
 	"io"
-	"strings"
 	"sync"
 
 	"github.com/kubesphere/ksctl/pkg/auth"
@@ -15,8 +14,6 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
-	describecmd "k8s.io/kubectl/pkg/cmd/describe"
-	"k8s.io/kubectl/pkg/cmd/get"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	kubectli18n "k8s.io/kubectl/pkg/util/i18n"
 )
@@ -115,11 +112,7 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 		ErrOut: streams.ErrOut,
 	}
 	cmd.AddCommand(plugincmd.NewCommand(cmd.DisplayName(), kubeStreams))
-	getCommand := get.NewCmdGet(cmd.DisplayName(), factory, kubeStreams)
-	getCommand.Example = strings.ReplaceAll(getCommand.Example, "kubectl ", cmd.DisplayName()+" ")
-	describeCommand := describecmd.NewCmdDescribe(cmd.DisplayName(), factory, kubeStreams)
-	describeCommand.Example = strings.ReplaceAll(describeCommand.Example, "kubectl ", cmd.DisplayName()+" ")
-	cmd.AddCommand(getCommand, describeCommand)
+	cmd.AddCommand(newResourceCommands(cmd.DisplayName(), factory, kubeStreams)...)
 
 	return cmd
 }

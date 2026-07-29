@@ -203,6 +203,28 @@ func TestKubectlPluginHelpUsesDisplayName(t *testing.T) {
 	}
 }
 
+func TestKubectlPluginLogsHelpUsesDisplayName(t *testing.T) {
+	out := new(bytes.Buffer)
+	cmd := NewKubectlPluginCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "dev"},
+	)
+	cmd.SetArgs([]string{"logs", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	help := out.String()
+	if !strings.Contains(help, "Usage:\n  kubectl ks logs") ||
+		strings.Contains(help, "Usage:\n  kubectl logs") {
+		t.Fatalf("plugin logs usage = %q", help)
+	}
+	if !strings.Contains(help, "kubectl ks logs nginx") ||
+		strings.Contains(help, "kubectl logs nginx") {
+		t.Fatalf("plugin logs examples should use kubectl ks: %q", help)
+	}
+}
+
 func TestRootRegistersNativeResourceCommands(t *testing.T) {
 	cmd := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
 
@@ -215,6 +237,15 @@ func TestRootRegistersNativeResourceCommands(t *testing.T) {
 	}
 	if findSubcommand(cmd, "list") != nil {
 		t.Fatal("list command is registered")
+	}
+	logsCommand := findSubcommand(cmd, "logs")
+	if logsCommand == nil {
+		t.Fatal("logs command is not registered")
+	}
+	for _, name := range []string{"follow", "previous", "container", "tail"} {
+		if logsCommand.Flags().Lookup(name) == nil {
+			t.Errorf("logs flag --%s is not registered", name)
+		}
 	}
 	for _, name := range []string{"output", "watch", "watch-only", "selector"} {
 		if getCommand.Flags().Lookup(name) == nil {
