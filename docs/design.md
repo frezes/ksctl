@@ -197,6 +197,14 @@ intent. Exact ExtensionVersion values remain opaque, but controller-facing
 operations directly require the resource identity `<extension>-<version>`.
 Required dependencies are validated without automatic installation.
 
+Install uses the Extension's current `status.recommendedVersion` when
+`--version` is omitted; upgrade still requires an explicit exact version. For
+a multicluster install, `--all-clusters` lists host `Clusters`, selects the
+current ready and schedulable set, and writes that resolved eligible snapshot
+as explicit placement rather than a dynamic selector. The snapshot includes
+the host Cluster when it satisfies the same conditions; the KubeSphere
+controller remains responsible for host handling.
+
 Lifecycle writes are asynchronous unless `--wait` is explicit. The waiter
 uses the accepted create or patch response as a target-local baseline, so a
 stale pre-existing terminal status is not attributed to the new operation.
@@ -211,9 +219,12 @@ recreation cannot be reported as the original operation's success.
 Diagnosis validates the controller's exact target ExtensionVersion and reports
 controller state, conditions, dependencies, Namespace, Job, Pod terminations,
 member statuses, and limited timestamp evidence. Completed retrying Jobs and
-recovered container history are distinguished from current failures. It
-suggests follow-up `kubectl logs` commands but does not retrieve logs, Secrets,
-or Helm values.
+recovered container history are distinguished from current failures. A complete
+healthy default result is a concise health line; other default results show
+only warning and error checks plus status counts, while `--verbose` shows every
+completed check. Interrupted diagnosis reports its completed checks and an
+incomplete marker before returning the service error. It suggests follow-up
+`kubectl logs` commands but does not retrieve logs, Secrets, or Helm values.
 
 Human-readable extension output escapes terminal control data. Extension
 commands also reject REST debug verbosity `--v=8` and higher because that

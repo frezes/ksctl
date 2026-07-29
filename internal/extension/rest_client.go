@@ -13,13 +13,17 @@ import (
 	kubesphererest "kubesphere.io/client-go/rest"
 )
 
-const extensionAPIPath = "/apis/kubesphere.io/v1alpha1"
+const (
+	extensionAPIPath = "/apis/kubesphere.io/v1alpha1"
+	clusterAPIPath   = "/apis/cluster.kubesphere.io/v1alpha1"
+)
 
 type APIClient interface {
 	ListExtensions(context.Context, string) (List[Extension], error)
 	GetExtension(context.Context, string) (Object[Extension], error)
 	ListExtensionVersions(context.Context, string) (List[ExtensionVersion], error)
 	GetExtensionVersion(context.Context, string) (Object[ExtensionVersion], error)
+	ListClusters(context.Context) (List[Cluster], error)
 	ListInstallPlans(context.Context) (List[InstallPlan], error)
 	GetInstallPlan(context.Context, string) (Object[InstallPlan], error)
 	CreateInstallPlan(context.Context, InstallPlan) (Object[InstallPlan], error)
@@ -102,6 +106,20 @@ func (c *restClient) ListExtensions(ctx context.Context, category string) (List[
 		return List[Extension]{}, fmt.Errorf("decode extensions: %w", err)
 	}
 	return list, nil
+}
+
+func (c *restClient) ListClusters(ctx context.Context) (List[Cluster], error) {
+	raw, err := resultRaw(c.client.Get().
+		AbsPath(clusterAPIPath, "clusters").
+		Do(ctx))
+	if err != nil {
+		return List[Cluster]{}, fmt.Errorf("list Fleet clusters: %w", err)
+	}
+	clusters, err := decodeList[Cluster](raw)
+	if err != nil {
+		return List[Cluster]{}, fmt.Errorf("decode Fleet clusters: %w", err)
+	}
+	return clusters, nil
 }
 
 func (c *restClient) GetExtension(ctx context.Context, name string) (Object[Extension], error) {

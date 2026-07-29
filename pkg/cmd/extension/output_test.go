@@ -95,8 +95,8 @@ func TestOutputListHeadersAndValues(t *testing.T) {
 		t.Fatalf("printList(table) error = %v", err)
 	}
 	if got, want := table.String(),
-		"NAME  CATEGORY       RECOMMENDED  INSTALLED  TARGET  STATE\n"+
-			"demo  observability  1.3.0        1.2.0      1.2.0   Installed\n"; got != want {
+		"NAME  CATEGORY       RECOMMENDED  INSTALLED  STATE\n"+
+			"demo  observability  1.3.0        1.2.0      Installed\n"; got != want {
 		t.Fatalf("table = %q, want %q", got, want)
 	}
 
@@ -105,8 +105,8 @@ func TestOutputListHeadersAndValues(t *testing.T) {
 		t.Fatalf("printList(wide) error = %v", err)
 	}
 	if got, want := wide.String(),
-		"NAME  CATEGORY       RECOMMENDED  INSTALLED  TARGET  STATE      PROVIDER    ENABLED\n"+
-			"demo  observability  1.3.0        1.2.0      1.2.0   Installed  KubeSphere  true\n"; got != want {
+		"NAME  CATEGORY       RECOMMENDED  INSTALLED  STATE      PROVIDER    ENABLED\n"+
+			"demo  observability  1.3.0        1.2.0      Installed  KubeSphere  true\n"; got != want {
 		t.Fatalf("wide = %q, want %q", got, want)
 	}
 }
@@ -151,7 +151,7 @@ func TestOutputDoesNotReportUnobservedTargetAsInstalled(t *testing.T) {
 	}
 	if !strings.Contains(
 		listOutput.String(),
-		"demo  <none>    <none>       <none>     2.0.0",
+		"demo  <none>    <none>       <none>     Preparing",
 	) {
 		t.Fatalf("list output = %q", listOutput.String())
 	}
@@ -163,6 +163,7 @@ func TestOutputDoesNotReportUnobservedTargetAsInstalled(t *testing.T) {
 			Extension:   item.Extension,
 			InstallPlan: item.InstallPlan,
 		},
+		outputWide,
 	); err != nil {
 		t.Fatalf("printShow() error = %v", err)
 	}
@@ -213,14 +214,12 @@ func TestOutputPrefersSuccessfulInstallPlanObservation(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := printShow(&output, result); err != nil {
+	if err := printShow(&output, result, outputTable); err != nil {
 		t.Fatalf("printShow() error = %v", err)
 	}
 	for _, want := range []string{
-		"State                Upgraded\n",
-		"Enabled              true\n",
-		"Installed Version    2.0.0\n",
-		"Target Version       2.0.0\n",
+		"State              Upgraded\n",
+		"Installed Version  2.0.0\n",
 	} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("show output = %q, want %q", output.String(), want)
@@ -228,7 +227,53 @@ func TestOutputPrefersSuccessfulInstallPlanObservation(t *testing.T) {
 	}
 }
 
-func TestOutputShowFieldOrderAndMissingScalars(t *testing.T) {
+func TestOutputShowDefaultIsConciseAndOmitsEmptyValues(t *testing.T) {
+	result := internalextension.ShowResult{
+		Extension: internalextension.Object[internalextension.Extension]{
+			Value: internalextension.Extension{
+				Metadata: internalextension.ObjectMeta{Name: "demo"},
+				Spec: internalextension.ExtensionSpec{
+					DisplayName: map[string]string{"en": "Demo"},
+				},
+				Status: internalextension.ExtensionStatus{
+					RecommendedVersion: "1.3.0",
+				},
+			},
+		},
+		InstallPlan: &internalextension.Object[internalextension.InstallPlan]{
+			Value: internalextension.InstallPlan{
+				Status: internalextension.InstallPlanStatus{
+					InstallationStatus: internalextension.InstallationStatus{
+						State:   "Installed",
+						Version: "1.2.1",
+					},
+				},
+			},
+		},
+	}
+	var output bytes.Buffer
+	if err := printShow(&output, result, outputTable); err != nil {
+		t.Fatalf("printShow() error = %v", err)
+	}
+	for _, want := range []string{
+		"Name                 demo\n",
+		"Display Name         Demo\n",
+		"State                Installed\n",
+		"Installed Version    1.2.1\n",
+		"Recommended Version  1.3.0\n",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output = %q, want %q", output.String(), want)
+		}
+	}
+	for _, absent := range []string{"Description", "Category", "Provider"} {
+		if strings.Contains(output.String(), absent) {
+			t.Fatalf("output = %q, unexpectedly contains %q", output.String(), absent)
+		}
+	}
+}
+
+func TestOutputShowWideFieldOrderAndMissingScalars(t *testing.T) {
 	extension := internalextension.Extension{
 		Metadata: internalextension.ObjectMeta{Name: "demo"},
 		Spec: internalextension.ExtensionSpec{
@@ -247,7 +292,7 @@ func TestOutputShowFieldOrderAndMissingScalars(t *testing.T) {
 		},
 	}
 	var output bytes.Buffer
-	if err := printShow(&output, result); err != nil {
+	if err := printShow(&output, result, outputWide); err != nil {
 		t.Fatalf("printShow() error = %v", err)
 	}
 	wantOrder := []string{
@@ -313,7 +358,7 @@ func TestOutputSelectedVersionFieldOrder(t *testing.T) {
 	}
 	result.SelectedVersion.Value.Metadata.Labels = nil
 	var output bytes.Buffer
-	if err := printShow(&output, result); err != nil {
+	if err := printShow(&output, result, outputTable); err != nil {
 		t.Fatalf("printShow() error = %v", err)
 	}
 	wantOrder := []string{
@@ -340,6 +385,72 @@ func TestOutputSelectedVersionFieldOrder(t *testing.T) {
 		!strings.Contains(output.String(), "Extension           demo\n") ||
 		!strings.Contains(output.String(), "logging") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestOutputShowPrintsSortedClusterSchedulingStatuses(t *testing.T) {
+	result := internalextension.ShowResult{
+		Extension: internalextension.Object[internalextension.Extension]{
+			Value: internalextension.Extension{
+				Metadata: internalextension.ObjectMeta{Name: "demo"},
+			},
+		},
+		InstallPlan: &internalextension.Object[internalextension.InstallPlan]{
+			Value: internalextension.InstallPlan{
+				Status: internalextension.InstallPlanStatus{
+					ClusterSchedulingStatuses: map[string]internalextension.InstallationStatus{
+						"member-z": {
+							Version:         "1.2.1",
+							State:           "Installing",
+							TargetNamespace: "demo-system",
+							JobName:         "job-z",
+						},
+						"member-a": {
+							Version:         "1.2.1",
+							State:           "Installed",
+							TargetNamespace: "demo-system",
+							JobName:         "job-a",
+						},
+					},
+				},
+			},
+		},
+	}
+	var compact bytes.Buffer
+	if err := printShow(&compact, result, outputTable); err != nil {
+		t.Fatalf("printShow(table) error = %v", err)
+	}
+	if !strings.Contains(
+		compact.String(),
+		"clusterSchedulingStatuses\n\nCLUSTER   VERSION  STATE\n"+
+			"member-a  1.2.1    Installed\n"+
+			"member-z  1.2.1    Installing\n",
+	) {
+		t.Fatalf("compact output = %q", compact.String())
+	}
+
+	var wide bytes.Buffer
+	if err := printShow(&wide, result, outputWide); err != nil {
+		t.Fatalf("printShow(wide) error = %v", err)
+	}
+	for _, want := range []string{
+		"CLUSTER",
+		"VERSION",
+		"STATE",
+		"NAMESPACE",
+		"JOB",
+		"member-a",
+		"job-a",
+		"member-z",
+		"job-z",
+	} {
+		if !strings.Contains(wide.String(), want) {
+			t.Fatalf("wide output = %q, want %q", wide.String(), want)
+		}
+	}
+	if strings.Index(wide.String(), "member-a") >
+		strings.Index(wide.String(), "member-z") {
+		t.Fatalf("wide output is not sorted: %q", wide.String())
 	}
 }
 
@@ -465,5 +576,11 @@ func TestOutputFormattingHelpers(t *testing.T) {
 		"de": "Deutsch",
 	}); got != "Deutsch" {
 		t.Fatalf("localized(fallback) = %q", got)
+	}
+	if got := localizedValue(map[string]string{
+		"de": "",
+		"fr": "Français",
+	}); got != "Français" {
+		t.Fatalf("localizedValue() = %q", got)
 	}
 }

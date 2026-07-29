@@ -131,15 +131,17 @@ func newInstallCommand(
 	factory ServiceFactory,
 ) *cobra.Command {
 	var version string
+	var allClusters bool
 	var config configurationFlags
 	var wait waitFlags
 	command := &cobra.Command{
-		Use:     "install NAME",
-		Short:   "Install an exact KubeSphere extension version",
-		Example: parent + " extension install NAME --version VERSION",
-		Args:    exactExtensionNameArgs,
+		Use:   "install NAME",
+		Short: "Install a KubeSphere extension",
+		Example: parent + " extension install NAME\n" +
+			parent + " extension install NAME --all-clusters",
+		Args: exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			if strings.TrimSpace(version) == "" {
+			if command.Flags().Changed("version") && strings.TrimSpace(version) == "" {
 				return fmt.Errorf("--version requires a non-empty exact version")
 			}
 			if err := wait.validate(command); err != nil {
@@ -157,10 +159,11 @@ func newInstallCommand(
 				command.Context(),
 				args[0],
 				internalextension.InstallOptions{
-					Version:   version,
-					Config:    loaded.Config,
-					Clusters:  loaded.Clusters,
-					Overrides: loaded.Overrides,
+					Version:     version,
+					Config:      loaded.Config,
+					Clusters:    loaded.Clusters,
+					AllClusters: allClusters,
+					Overrides:   loaded.Overrides,
 				},
 			)
 			if err != nil {
@@ -182,9 +185,16 @@ func newInstallCommand(
 		&version,
 		"version",
 		"",
-		"Exact extension version to install",
+		"Exact extension version; defaults to status.recommendedVersion",
 	)
 	config.addInstall(command)
+	command.Flags().BoolVar(
+		&allClusters,
+		"all-clusters",
+		false,
+		"Install the extension agent on every ready, schedulable Fleet Cluster",
+	)
+	command.MarkFlagsMutuallyExclusive("clusters", "all-clusters")
 	wait.add(command)
 	return command
 }

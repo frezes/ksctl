@@ -74,7 +74,10 @@ func TestExtensionFactoryStaysLazyForLocalFailures(t *testing.T) {
 		},
 		{
 			name: "input",
-			args: []string{"extension", "install", "demo"},
+			args: []string{
+				"extension", "install", "demo",
+				"--override", "invalid",
+			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

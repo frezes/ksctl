@@ -80,17 +80,28 @@ func pendingScalar(value string) string {
 	return value
 }
 
-func localized(values map[string]string) string {
+func localizedValue(values map[string]string) string {
 	for _, key := range []string{"en", "en-US", "zh", "zh-CN"} {
 		if value := values[key]; value != "" {
 			return value
 		}
 	}
-	keys := slices.Sorted(maps.Keys(values))
-	if len(keys) == 0 {
-		return "<none>"
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		if value := values[key]; value != "" {
+			return value
+		}
 	}
-	return scalar(values[keys[0]])
+	return ""
+}
+
+func localized(values map[string]string) string {
+	return scalar(localizedValue(values))
+}
+
+func appendNonEmptyRow(rows *[][]string, field, value string) {
+	if value != "" {
+		*rows = append(*rows, []string{field, value})
+	}
 }
 
 func printList(
@@ -103,7 +114,6 @@ func printList(
 		"CATEGORY",
 		"RECOMMENDED",
 		"INSTALLED",
-		"TARGET",
 		"STATE",
 	}
 	if format == outputWide {
@@ -115,11 +125,9 @@ func printList(
 		extension := item.Extension.Value
 		state := extension.Status.State
 		installedVersion := extension.Status.InstalledVersion
-		targetVersion := ""
 		if item.InstallPlan != nil {
 			plan := item.InstallPlan.Value
 			state = plan.Status.State
-			targetVersion = plan.Spec.Extension.Version
 			if successfulPlanState(plan.Status.State) &&
 				plan.Status.Version != "" {
 				installedVersion = plan.Status.Version
@@ -130,7 +138,6 @@ func printList(
 			scalar(extensionCategory(extension)),
 			scalar(extension.Status.RecommendedVersion),
 			scalar(installedVersion),
-			scalar(targetVersion),
 			scalar(state),
 		}
 		if format == outputWide {
@@ -211,6 +218,7 @@ func optionalBool(value *bool) string {
 func printShow(
 	out io.Writer,
 	result internalextension.ShowResult,
+	format outputFormat,
 ) error {
 	if result.SelectedVersion != nil {
 		return printSelectedVersion(out, result)
@@ -231,29 +239,84 @@ func printShow(
 		}
 	}
 
-	versionValues := make([]string, 0, len(result.Versions.Items))
-	for _, version := range result.Versions.Items {
-		versionValues = append(versionValues, version.Value.Spec.Version)
-	}
-	if len(versionValues) == 0 {
-		for _, version := range extension.Status.Versions {
-			versionValues = append(versionValues, version.Version)
+	rows := [][]string{{"FIELD", "VALUE"}}
+	if format == outputWide {
+		versionValues := make([]string, 0, len(result.Versions.Items))
+		for _, version := range result.Versions.Items {
+			versionValues = append(versionValues, version.Value.Spec.Version)
 		}
+		if len(versionValues) == 0 {
+			for _, version := range extension.Status.Versions {
+				versionValues = append(versionValues, version.Version)
+			}
+		}
+		rows = append(rows,
+			[]string{"Name", scalar(extension.Metadata.Name)},
+			[]string{"Display Name", localized(extension.Spec.DisplayName)},
+			[]string{"Description", localized(extension.Spec.Description)},
+			[]string{"Category", scalar(extensionCategory(extension))},
+			[]string{"Provider", providerDetail(extension.Spec.Provider)},
+			[]string{"State", scalar(state)},
+			[]string{"Enabled", enabled},
+			[]string{"Installed Version", scalar(installedVersion)},
+			[]string{"Target Version", scalar(targetVersion)},
+			[]string{"Recommended Version", scalar(extension.Status.RecommendedVersion)},
+			[]string{"Versions", stringList(versionValues)},
+			[]string{"Conditions", formatConditions(extension.Status.Conditions)},
+		)
+	} else {
+		appendNonEmptyRow(&rows, "Name", extension.Metadata.Name)
+		appendNonEmptyRow(&rows, "Display Name", localizedValue(extension.Spec.DisplayName))
+		appendNonEmptyRow(&rows, "Description", localizedValue(extension.Spec.Description))
+		appendNonEmptyRow(&rows, "Category", extensionCategory(extension))
+		appendNonEmptyRow(&rows, "State", state)
+		appendNonEmptyRow(&rows, "Installed Version", installedVersion)
+		appendNonEmptyRow(&rows, "Recommended Version", extension.Status.RecommendedVersion)
 	}
-	rows := [][]string{
-		{"FIELD", "VALUE"},
-		{"Name", scalar(extension.Metadata.Name)},
-		{"Display Name", localized(extension.Spec.DisplayName)},
-		{"Description", localized(extension.Spec.Description)},
-		{"Category", scalar(extensionCategory(extension))},
-		{"Provider", providerDetail(extension.Spec.Provider)},
-		{"State", scalar(state)},
-		{"Enabled", enabled},
-		{"Installed Version", scalar(installedVersion)},
-		{"Target Version", scalar(targetVersion)},
-		{"Recommended Version", scalar(extension.Status.RecommendedVersion)},
-		{"Versions", stringList(versionValues)},
-		{"Conditions", formatConditions(extension.Status.Conditions)},
+	if err := writeTable(out, rows); err != nil {
+		return err
+	}
+	if result.InstallPlan == nil {
+		return nil
+	}
+	return printClusterSchedulingStatuses(
+		out,
+		result.InstallPlan.Value.Status.ClusterSchedulingStatuses,
+		format,
+	)
+}
+
+func printClusterSchedulingStatuses(
+	out io.Writer,
+	statuses map[string]internalextension.InstallationStatus,
+	format outputFormat,
+) error {
+	if len(statuses) == 0 {
+		return nil
+	}
+	if _, err := io.WriteString(out, "\nclusterSchedulingStatuses\n\n"); err != nil {
+		return err
+	}
+	headers := []string{"CLUSTER", "VERSION", "STATE"}
+	if format == outputWide {
+		headers = append(headers, "NAMESPACE", "JOB")
+	}
+	rows := [][]string{headers}
+	for _, cluster := range slices.Sorted(maps.Keys(statuses)) {
+		status := statuses[cluster]
+		row := []string{
+			cluster,
+			scalar(status.Version),
+			scalar(status.State),
+		}
+		if format == outputWide {
+			row = append(
+				row,
+				scalar(status.TargetNamespace),
+				scalar(status.JobName),
+			)
+		}
+		rows = append(rows, row)
 	}
 	return writeTable(out, rows)
 }

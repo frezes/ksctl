@@ -178,14 +178,14 @@ The extension workflow is available through both `ksctl extension` and
 
 ```text
 ksctl extension list [--category CATEGORY] [--installed] [-o table|wide|json|yaml]
-ksctl extension show NAME [--version VERSION] [-o table|json|yaml]
+ksctl extension show NAME [--version VERSION] [-o table|wide|json|yaml]
 ksctl extension versions NAME [-o table|json|yaml]
 ksctl extension status [NAME] [--watch] [--wait-timeout 10m]
-ksctl extension install NAME --version VERSION [configuration flags] [--wait]
+ksctl extension install NAME [--version VERSION] [--all-clusters]
 ksctl extension upgrade NAME --version VERSION [configuration flags] [--wait]
 ksctl extension configure NAME [configuration flags] [--wait]
 ksctl extension uninstall NAME [--wait]
-ksctl extension diagnose NAME [--target-cluster CLUSTER]
+ksctl extension diagnose NAME [--target-cluster CLUSTER] [--verbose]
 ```
 
 Extension resources are always managed on the KubeSphere host. A Context's
@@ -205,6 +205,7 @@ ksctl extension list
 ksctl extension list --category observability --installed
 ksctl extension list -o wide
 ksctl extension show logging
+ksctl extension show logging -o wide
 ksctl extension show logging --version 1.2.1
 ksctl extension versions logging
 ksctl extension status
@@ -213,17 +214,26 @@ ksctl extension status logging --watch --wait-timeout 10m
 ```
 
 JSON and YAML preserve complete server objects, including fields unknown to
-this ksctl release. Table output keeps observed `INSTALLED` and requested
-`TARGET` versions separate. `status --watch` requires a name and table output.
+this ksctl release. The default `list` table is concise (`NAME`, `CATEGORY`,
+`RECOMMENDED`, `INSTALLED`, and `STATE`); `list -o wide` additionally shows
+`PROVIDER` and `ENABLED`. The default `show` table similarly omits empty
+optional fields, while `show -o wide` retains its complete detailed field set,
+including observed `INSTALLED` and requested `TARGET` versions. `show NAME
+--version VERSION` continues to show the selected exact-version details.
+`status --watch` requires a name and table output.
 
-### Install and upgrade exact versions
+### Install and upgrade versions
 
-Install and upgrade require an exact, opaque `--version`; ksctl does not select
-the recommended version or rewrite a `v` prefix. The KubeSphere controller
-requires the corresponding ExtensionVersion resource to be named exactly
-`<extension>-<version>`, and ksctl verifies that identity directly:
+Install defaults to the Extension's current `status.recommendedVersion` when
+`--version` is omitted; pass a non-empty `--version` to select a different
+exact, opaque version. Upgrade always requires an exact `--version`. ksctl
+never rewrites a `v` prefix. The
+KubeSphere controller requires the corresponding ExtensionVersion resource to
+be named exactly `<extension>-<version>`, and ksctl verifies that identity
+directly:
 
 ```bash
+ksctl extension install logging
 ksctl extension install logging --version 1.2.1
 ksctl extension upgrade logging --version 1.3.0
 ```
@@ -262,6 +272,18 @@ ksctl extension install logging --version 1.2.1 \
   --clusters member-a,member-b \
   --override member-a=./member-a.yaml \
   --override member-b=./member-b.yaml
+```
+
+For a multicluster extension, `--all-clusters` selects the current eligible
+snapshot from host `Clusters`: every non-deleting Cluster with `KSCoreReady`
+true and no explicit `Schedulable=False` condition. ksctl writes that resolved
+list to the InstallPlan; it does not leave a dynamic all-cluster selector.
+The resolved snapshot includes the host Cluster when it satisfies the same
+eligibility conditions; the KubeSphere controller remains responsible for
+host handling.
+
+```bash
+ksctl extension install logging --all-clusters
 ```
 
 Upgrade can change configuration and placement in the same guarded update:
@@ -314,7 +336,14 @@ timestamp consistency:
 ```bash
 ksctl extension diagnose logging
 ksctl extension diagnose logging --target-cluster member-a
+ksctl extension diagnose logging --verbose
 ```
+
+For a complete healthy diagnosis, default output is a one-line health summary.
+Otherwise it prints only `WARN` and `ERROR` rows in order followed by status
+counts. `--verbose` prints every completed check and the same summary. If a
+service error interrupts diagnosis, ksctl prints the completed checks and an
+`incomplete` marker before returning that error.
 
 Diagnosis never retrieves logs, Secrets, or rendered Helm values. When further
 inspection is useful, it prints a `kubectl logs` command for the user to run.

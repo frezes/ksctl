@@ -11,7 +11,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 )
 
-func TestDiagnosePassesTargetAndPrintsChecksInOrder(t *testing.T) {
+func TestDiagnosePassesTargetAndPrintsIssuesInOrder(t *testing.T) {
 	streams, out, _ := bufferedStreams()
 	var gotName string
 	var gotOptions internalextension.DiagnoseOptions
@@ -29,9 +29,19 @@ func TestDiagnosePassesTargetAndPrintsChecksInOrder(t *testing.T) {
 					Message: "extension exists",
 				},
 				{
+					Name:    "install-plan",
+					Status:  internalextension.DiagnosticInfo,
+					Message: "install plan is active",
+				},
+				{
 					Name:    "job",
 					Status:  internalextension.DiagnosticWarn,
 					Message: "Job was removed by TTL",
+				},
+				{
+					Name:    "workload",
+					Status:  internalextension.DiagnosticError,
+					Message: "executor is unavailable",
 				},
 			}}, nil
 		},
@@ -48,17 +58,79 @@ func TestDiagnosePassesTargetAndPrintsChecksInOrder(t *testing.T) {
 		streams,
 		func() (Service, error) { return service, nil },
 	)
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
+	if !errors.Is(err, internalextension.ErrDiagnosisFailed) {
+		t.Fatalf("Execute() error = %v, want ErrDiagnosisFailed", err)
 	}
 	if gotName != "demo" ||
 		gotOptions.TargetCluster != "member-a" {
 		t.Fatalf("Diagnose(%q, %#v)", gotName, gotOptions)
 	}
 	if got, want := out.String(),
-		"CHECK      STATUS  MESSAGE\n"+
-			"extension  OK      extension exists\n"+
-			"job        WARN    Job was removed by TTL\n"; got != want {
+		"CHECK     STATUS  MESSAGE\n"+
+			"job       WARN    Job was removed by TTL\n"+
+			"workload  ERROR   executor is unavailable\n"+
+			"Summary: OK=1 INFO=1 WARN=1 ERROR=1\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestDiagnoseHealthyDefaultPrintsSummaryOnly(t *testing.T) {
+	streams, out, _ := bufferedStreams()
+	service := &fakeService{diagnoseFn: func(
+		context.Context,
+		string,
+		internalextension.DiagnoseOptions,
+	) (internalextension.Diagnosis, error) {
+		return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{
+			{Name: "extension", Status: internalextension.DiagnosticOK},
+			{Name: "install-plan", Status: internalextension.DiagnosticInfo},
+		}}, nil
+	}}
+	err := executeExtensionCommand(
+		t,
+		[]string{"extension", "diagnose", "demo"},
+		streams,
+		func() (Service, error) { return service, nil },
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got, want := out.String(),
+		"extension/demo: healthy (2 checks passed)\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestDiagnoseVerbosePrintsEveryCheck(t *testing.T) {
+	streams, out, _ := bufferedStreams()
+	service := &fakeService{diagnoseFn: func(
+		context.Context,
+		string,
+		internalextension.DiagnoseOptions,
+	) (internalextension.Diagnosis, error) {
+		return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{
+			{Name: "extension", Status: internalextension.DiagnosticOK, Message: "exists"},
+			{Name: "install-plan", Status: internalextension.DiagnosticInfo, Message: "active"},
+			{Name: "job", Status: internalextension.DiagnosticWarn, Message: "expired"},
+			{Name: "workload", Status: internalextension.DiagnosticError, Message: "unavailable"},
+		}}, nil
+	}}
+	err := executeExtensionCommand(
+		t,
+		[]string{"extension", "diagnose", "demo", "--verbose"},
+		streams,
+		func() (Service, error) { return service, nil },
+	)
+	if !errors.Is(err, internalextension.ErrDiagnosisFailed) {
+		t.Fatalf("Execute() error = %v, want ErrDiagnosisFailed", err)
+	}
+	if got, want := out.String(),
+		"CHECK         STATUS  MESSAGE\n"+
+			"extension     OK      exists\n"+
+			"install-plan  INFO    active\n"+
+			"job           WARN    expired\n"+
+			"workload      ERROR   unavailable\n"+
+			"Summary: OK=1 INFO=1 WARN=1 ERROR=1\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
@@ -117,8 +189,10 @@ func TestDiagnosePrintsAccumulatedChecksBeforeServiceError(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Execute() error = %v, want sentinel", err)
 	}
-	if !strings.Contains(out.String(), "extension  OK") {
-		t.Fatalf("stdout = %q", out.String())
+	if got, want := out.String(),
+		"Summary: OK=1 INFO=0 WARN=0 ERROR=0\n"+
+			"extension/demo: diagnosis incomplete (1 checks completed)\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
 

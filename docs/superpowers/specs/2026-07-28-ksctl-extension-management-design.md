@@ -24,21 +24,22 @@ This change adds:
 
 ```text
 ksctl extension list
-ksctl extension show NAME [--version VERSION]
+ksctl extension show NAME [--version VERSION] [-o table|wide|json|yaml]
 ksctl extension versions NAME
 ksctl extension status [NAME]
-ksctl extension install NAME --version VERSION
+ksctl extension install NAME [--version VERSION] [--all-clusters]
 ksctl extension upgrade NAME --version VERSION
 ksctl extension configure NAME
 ksctl extension uninstall NAME
-ksctl extension diagnose NAME
+ksctl extension diagnose NAME [--target-cluster CLUSTER] [--verbose]
 ```
 
 The same commands are exposed through `kubectl ks extension ...`.
 
 The command group:
 
-- requires an exact version for install and upgrade;
+- defaults install to the current recommended version and requires an exact
+  version for upgrade;
 - validates required external extension dependencies without installing them;
 - supports global YAML configuration and per-cluster YAML overrides;
 - supports explicit multicluster placement;
@@ -54,7 +55,7 @@ This change does not:
 
 - add an `extension logs` command or read container logs;
 - run Helm from the client;
-- automatically select a latest or recommended version;
+- select a version when the Extension has no current recommended version;
 - recursively install missing dependencies;
 - manage extension repositories;
 - add enable or disable commands;
@@ -141,16 +142,17 @@ An InstallPlan is keyed by the extension name:
 metadata.name == spec.extension.name
 ```
 
-Install and upgrade require:
+Upgrade requires:
 
 ```text
 --version VERSION
 ```
 
-`VERSION` is treated as an exact, opaque value. ksctl does not rewrite it,
-remove a `v` prefix, or substitute `recommendedVersion`. The corresponding
-ExtensionVersion must exist and its `spec.version` must equal the requested
-value.
+`VERSION` is treated as an exact, opaque value. ksctl does not rewrite it or
+remove a `v` prefix. Install uses the Extension's current
+`status.recommendedVersion` when `--version` is omitted and returns an error if
+that value is empty. The corresponding ExtensionVersion must exist and its
+`spec.version` must equal the selected value.
 
 Extension names are validated as Kubernetes path segments before the
 connection is resolved. Cluster names additionally must be DNS-1123
@@ -183,20 +185,40 @@ as installed.
 Default columns:
 
 ```text
-NAME  CATEGORY  RECOMMENDED  INSTALLED  TARGET  STATE
+NAME  CATEGORY  RECOMMENDED  INSTALLED  STATE
 ```
 
-Wide output adds provider and enabled state when available. Table rows are
-sorted by extension name. `INSTALLED` is an observed successful version and
-never falls back to `spec.extension.version`; `TARGET` is the requested spec
-version.
+Wide output adds provider and enabled state when available:
+
+```text
+NAME  CATEGORY  RECOMMENDED  INSTALLED  STATE  PROVIDER  ENABLED
+```
+
+Table rows are sorted by extension name. `INSTALLED` is an observed successful
+version and never falls back to `spec.extension.version`. The requested target
+version remains available from status and structured resources, but is not
+rendered by `extension list` in either table mode.
 
 ### `extension show`
 
 `show NAME` displays extension metadata, available and installed versions,
-state, conditions, provider information, and descriptions.
+state, conditions, provider information, and descriptions. It accepts
+`-o table|wide|json|yaml`; `--version VERSION` selects exact version details.
+The default table shows only non-empty concise fields:
 
-The default field order for an Extension is:
+```text
+Name
+Display Name
+Description
+Category
+State
+Installed Version
+Recommended Version
+```
+
+`Name` is always present; missing optional fields are omitted. Wide output
+retains the complete detailed field set and renders unavailable detailed values
+as `<none>`:
 
 ```text
 Name
@@ -212,6 +234,11 @@ Recommended Version
 Versions
 Conditions
 ```
+
+When an InstallPlan contains member scheduling status, both table modes append
+a titled `clusterSchedulingStatuses` section. Its default columns are
+`CLUSTER`, `VERSION`, and `STATE`; wide output also includes `NAMESPACE` and
+`JOB`. Rows are sorted by Cluster name.
 
 `show NAME --version VERSION` displays exact version details, including:
 
@@ -344,11 +371,13 @@ Install does not expose clearing flags because no prior InstallPlan exists.
 
 ## Install Workflow
 
-`extension install NAME --version VERSION` performs:
+`extension install NAME [--version VERSION] [--all-clusters]` performs:
 
 1. Validate arguments, scope flags, local files, and flag combinations.
 2. Get the named Extension.
-3. Get the exact ExtensionVersion.
+3. Use `status.recommendedVersion` only when `--version` is omitted, then get
+   the exact selected ExtensionVersion. An explicit empty or whitespace-only
+   `--version` is rejected before service construction.
 4. Validate installation mode and scheduling inputs.
 5. Validate required external dependencies.
 6. Confirm that no same-name InstallPlan exists.
@@ -373,6 +402,15 @@ Install does not expose clearing flags because no prior InstallPlan exists.
 
 If an InstallPlan already exists, install does not mutate it. The error directs
 the user to `extension upgrade` or `extension configure`.
+
+`--all-clusters` is mutually exclusive with explicit `--clusters`. For a
+multicluster ExtensionVersion, it lists host `Clusters`, includes every
+non-deleting Cluster with `KSCoreReady=True` and without
+`Schedulable=False`, and writes that current eligible snapshot as the explicit
+InstallPlan placement. It rejects non-multicluster versions and an empty
+eligible snapshot. The resolved snapshot includes the host Cluster when it
+satisfies the same eligibility conditions; the KubeSphere controller remains
+responsible for host handling.
 
 ## Upgrade Workflow
 
@@ -559,7 +597,8 @@ available.
 
 ## Diagnosis
 
-`extension diagnose NAME` produces a check table without reading logs.
+`extension diagnose NAME [--target-cluster CLUSTER] [--verbose]` produces
+problem-focused diagnostic output without reading logs.
 
 The table header is:
 
@@ -608,9 +647,30 @@ documented symptom, such as a completed Job whose InstallPlan remains in a
 transition and inconsistent completion timestamps. The CLI does not claim to
 measure or repair node NTP state.
 
-Diagnostics print all completed checks. Definite errors produce a non-zero
-exit status after the table is written. Warnings, including possible clock
-skew, do not alone make the command fail.
+A complete healthy diagnosis prints exactly one health summary line:
+
+```text
+extension/NAME: healthy (N checks passed)
+```
+
+For non-healthy results, default output preserves check order but prints only
+`WARN` and `ERROR` rows, followed by:
+
+```text
+Summary: OK=N INFO=N WARN=N ERROR=N
+```
+
+`--verbose` prints every completed row before the same summary. If diagnosis
+is interrupted by a service error, it still prints accumulated rows and status
+counts, then:
+
+```text
+extension/NAME: diagnosis incomplete (N checks completed)
+```
+
+The service error keeps precedence over any diagnosis error. Definite errors
+produce a non-zero exit status after diagnostic output is written. Warnings,
+including possible clock skew, do not alone make the command fail.
 
 The output includes exact Namespace, Job name, Pod names, and suggested
 follow-up `kubectl` commands where further log inspection is useful.
@@ -621,7 +681,8 @@ Human-readable query output is deterministic:
 
 - stable column names;
 - stable name or version ordering;
-- `<none>` for missing scalar values; and
+- `<none>` for unavailable wide and exact-version scalar values, while the
+  concise `show` table omits empty optional fields; and
 - one final newline.
 
 JSON output is valid JSON followed by a newline. YAML output is converted from
@@ -629,8 +690,10 @@ the complete JSON response and also ends with one newline. Filters apply to
 structured list output while preserving unknown fields in retained items.
 
 Ordinary failures produce no successful stdout output. Wait progress belongs
-on stderr. Diagnosis is the deliberate exception: its accumulated check table
-is useful even when the final exit status is non-zero.
+on stderr. Diagnosis is the deliberate exception: a complete healthy result is
+a one-line summary; non-healthy or verbose output ends with deterministic
+status counts, and interrupted diagnosis appends an incomplete marker before
+returning its error.
 
 Output writer failures are returned with operation-specific context.
 
