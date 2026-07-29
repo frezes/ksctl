@@ -4,8 +4,7 @@
 
 ## 简介
 
-`ksctl` 是 KubeSphere 4.x 的命令行客户端。它连接到 KubeSphere API 端点，可用于查看
-KubeSphere 暴露的 Kubernetes 资源、租户资源以及管理 KubeSphere 扩展组件。
+`ksctl` 是 KubeSphere 4.x 的命令行客户端。它连接到 KubeSphere API 端点，可用于查看 KubeSphere 暴露的 Kubernetes 资源、租户资源以及管理 KubeSphere 扩展组件。
 
 同一命令树可通过两个入口使用：
 
@@ -16,8 +15,7 @@ kubectl ks get pods -A
 
 本指南中的示例使用 `ksctl`。使用 kubectl 插件时，请将其替换为 `kubectl ks`。
 
-通用资源命令（`get`、`describe`、`logs` 和 `top`）及租户命令均为只读。`install`、
-`configure` 和 `uninstall` 等扩展组件生命周期命令会更改 KubeSphere 状态。
+通用资源命令（`get`、`describe`、`logs` 和 `top`）及租户命令均为只读。`install`、`configure` 和 `uninstall` 等扩展组件生命周期命令会更改 KubeSphere 状态。
 
 开始前，你需要：
 
@@ -46,7 +44,7 @@ ksctl COMMAND --help
 | 分类 | 用途 | 命令 | 可用性 |
 | --- | --- | --- | --- |
 | Kubernetes 资源管理 | 查看 Kubernetes 资源和已发现的 KubeSphere 资源。 | `get`、`describe`、`logs`、`top` | 可用 |
-| 集群管理 | 管理 KubeSphere 主集群和成员 Cluster。 | — | 暂未提供 |
+| 集群管理 | 管理 KubeSphere host Cluster 和成员 Cluster。 | — | 暂未提供 |
 | 租户管理 | 查看 Workspace 及其 Namespace 和 Cluster。 | `tenant` | 可用 |
 | 扩展组件管理 | 查看、安装、配置、诊断和移除扩展组件。 | `extension` | 可用 |
 | 应用管理 | 管理 KubeSphere 应用。 | — | 暂未提供 |
@@ -54,8 +52,7 @@ ksctl COMMAND --help
 
 ## Kubernetes 资源管理
 
-资源命令使用与 kubectl 兼容的资源发现、选择器、输出器和工作负载日志行为。资源类型及其
-作用域来自已连接的服务器，而不是 ksctl 中的静态注册表。
+资源命令使用与 kubectl 兼容的资源发现、选择器、输出器和工作负载日志行为。资源类型及其作用域来自已连接的服务器，而不是 ksctl 中的静态注册表。
 
 ### 选择资源作用域
 
@@ -98,8 +95,7 @@ ksctl describe deployment web -n demo
 ksctl describe pod/web-0 -n demo --cluster member-1
 ```
 
-可接受的单数、复数、短名称、带版本名称和带组限定名称取决于服务器发现。`describe` 不支持
-结构化 `-o` 输出；需要其他输出格式时请使用 `get`。
+可接受的单数、复数、短名称、带版本名称和带组限定名称取决于服务器发现。`describe` 不支持结构化 `-o` 输出；需要其他输出格式时请使用 `get`。
 
 ### 读取容器日志
 
@@ -111,8 +107,7 @@ ksctl logs deployment/web -n demo --all-pods
 ksctl logs deployment/web -n demo --all-pods --follow
 ```
 
-该命令通过 KubeSphere API 端点读取所选 Cluster。它不会搜索日志扩展组件，也不会在流中断后
-重新连接。日志可能包含敏感数据，请妥善保护终端捕获内容和重定向文件。
+该命令通过 KubeSphere API 端点读取所选 Cluster 中的日志。它不会搜索日志扩展组件，也不会在流中断后重新连接。日志可能包含敏感数据，请妥善保护终端捕获内容和重定向文件。
 
 ### 查看当前资源用量
 
@@ -124,13 +119,11 @@ ksctl top pod web-0 -n demo --containers
 ksctl top node --cluster member-1
 ```
 
-所选 Cluster 必须提供 Metrics Server。这些值是当前的自动扩缩容信号，而非历史监控数据；ksctl
-不会回退到 KubeSphere 监控扩展组件。
+所选 Cluster 必须提供 Metrics Server。这些值是当前的自动扩缩容信号，而非历史监控数据；ksctl 不会回退到 KubeSphere 监控扩展组件。
 
 ## 租户管理
 
-Workspace 将租户对 Namespace 和 Cluster 的访问进行分组。`tenant get` 从 KubeSphere 租户 API
-读取这些关系，而不是通过 Kubernetes 资源发现读取。
+Workspace 将租户对 Namespace 和 Cluster 的访问进行分组。`tenant get` 从 KubeSphere 租户 API 读取这些关系，而不是通过 Kubernetes 资源发现读取。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -148,17 +141,13 @@ ksctl tenant get ns --workspace platform --cluster member-1
 ksctl tenant get cluster --workspace platform
 ```
 
-可接受的名称包括 `workspace`/`workspaces`、`namespace`/`namespaces`/`ns` 和
-`cluster`/`clusters`。
+可接受的名称包括 `workspace`/`workspaces`、`namespace`/`namespaces`/`ns` 和 `cluster`/`clusters`。
 
-`--workspace` 过滤 Namespace 和 Cluster 结果。`--cluster` 将 Namespace 请求路由到所选成员
-Cluster，但不会更改 Workspace 或租户 Cluster 请求。输出可为 `table`、`json` 或 `yaml`。
+`--workspace` 过滤 Namespace 和 Cluster 结果。`--cluster` 将 Namespace 请求路由到所选成员 Cluster，但不会更改 Workspace 或租户 Cluster 请求。输出可为 `table`、`json` 或 `yaml`。
 
 ## 扩展组件管理
 
-扩展组件资源始终在 KubeSphere 主集群上管理。根级 `--cluster` 和 `--namespace` 参数不限定扩展
-组件命令的作用域。使用扩展组件部署位置参数选择成员 Cluster，或使用
-`diagnose --target-cluster` 查看成员状态。
+扩展组件资源始终在 KubeSphere host Cluster 上管理。Context 的默认 Cluster 会被忽略，而显式传递根级 `--cluster` 或 `--namespace` 参数会返回错误。请使用扩展组件部署位置参数选择成员 Cluster，或使用 `diagnose --target-cluster` 查看成员状态。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -183,8 +172,7 @@ ksctl extension show logging
 ksctl extension versions logging
 ```
 
-在支持的地方可使用 `-o table`、`-o wide`、`-o json` 或 `-o yaml`。JSON 和 YAML 会保留完整的
-服务器对象。
+在支持的地方可使用 `-o table`、`-o wide`、`-o json` 或 `-o yaml`。JSON 和 YAML 会保留完整的服务器对象。
 
 ### 管理生命周期
 
@@ -198,8 +186,7 @@ ksctl extension configure logging --config ./logging-values.yaml
 ksctl extension uninstall logging --wait
 ```
 
-生命周期请求默认异步执行，并会在 API 接受请求后返回。添加 `--wait` 可轮询完成状态。卸载会删除
-InstallPlan，且不进行交互式确认。
+生命周期请求默认异步执行，并会在 API 接受请求后返回。添加 `--wait` 可轮询完成状态。卸载会删除 InstallPlan，且不进行交互式确认。
 
 配置输入必须是非空 YAML 映射。使用 `--config FILE`，或使用 `--config -` 从标准输入读取。
 
@@ -213,8 +200,7 @@ ksctl extension configure logging --override member-a=./member-a.yaml
 ksctl extension diagnose logging --target-cluster member-a
 ```
 
-`--all-clusters` 解析当前符合条件的 Cluster 集合并保存该快照；它不是动态选择器。诊断会检查
-控制器状态，但不会检索日志、Secret 或渲染后的 Helm 值。
+`--all-clusters` 解析当前符合条件的 Cluster 集合并保存该快照；它不是动态选择器。诊断会检查控制器状态，但不会检索日志、Secret 或渲染后的 Helm 值。
 
 扩展组件命令请使用不高于 7 的详细级别。更高的 REST 调试详细级别可能会泄露扩展组件配置。
 
@@ -237,12 +223,9 @@ ksctl extension diagnose logging --target-cluster member-a
 ksctl auth login
 ```
 
-Fleet 将 API 端点、TLS 设置和其用户分组。登录时，Fleet 名称默认为 API 端点主机名，Context 名称
-默认为 `<fleet>-<username>`。新的 Context 会成为当前 Context。
+Fleet 将 API 端点、TLS 设置和其用户分组。登录时，Fleet 名称默认为 API 端点主机名，Context 名称默认为 `<fleet>-<username>`。新的 Context 会成为当前 Context。
 
-引导流程输入的密码不会被持久化。对于非交互式登录，请避免通过 shell 历史记录、日志或进程检查
-暴露 `--password`。`config view` 默认会脱敏凭据；不要共享 `config view --raw` 输出。登出会清除
-缓存的登录凭据，但不会删除 Context。
+引导流程输入的密码不会被持久化。对于非交互式登录，请避免通过 shell 历史记录、日志或进程检查暴露 `--password`。`config view` 默认会脱敏凭据；不要共享 `config view --raw` 输出。登出会清除缓存的登录凭据，但不会删除 Context。
 
 ### 覆盖连接设置
 
@@ -254,8 +237,7 @@ ksctl get workspaces \
   --token "$KS_TOKEN"
 ```
 
-显式 `--endpoint` 或 `KS_ENDPOINT` 必须与显式 `--token` 或 `KS_TOKEN` 配对。ksctl 绝不会将被
-覆盖的 API 端点与所选 Context 的凭据组合使用。
+显式 `--endpoint` 或 `KS_ENDPOINT` 必须与显式 `--token` 或 `KS_TOKEN` 配对。ksctl 绝不会将被覆盖的 API 端点与所选 Context 的凭据组合使用。
 
 ### 生成 kubeconfig
 
@@ -266,8 +248,7 @@ umask 077
 ksctl config generate kubeconfig --cluster member-1 > member-1.kubeconfig
 ```
 
-服务器响应会原样写入标准输出，且不会合并到 `~/.kube/config`。输出包含凭据，因此请以严格的
-权限保存。
+服务器响应会原样写入标准输出，且不会合并到 `~/.kube/config`。输出包含凭据，因此请以严格的权限保存。
 
 ### 调用 API 或使用插件
 
@@ -277,8 +258,9 @@ ksctl config generate kubeconfig --cluster member-1 > member-1.kubeconfig
 ksctl api /kapis/version
 ```
 
-`api` 默认使用 GET。未指定 `--method` 而提供 `--data` 时，默认方法变为 POST，响应正文会原样
-写入。发送会更改状态的请求前，请运行 `ksctl api --help`。
+`api` 默认使用 GET。未指定 `--method` 而提供 `--data` 时，默认方法变为 POST，响应正文会原样写入。发送会更改状态的请求前，请运行 `ksctl api --help`。
+
+`API_PATH` 会原样发送。`--cluster`、`--namespace` 和 Context 的默认 Cluster 都不会自动添加作用域。调用成员 Cluster 时，必须在 `API_PATH` 中包含 `/clusters/CLUSTER/...`。
 
 名为 `ksctl-foo` 的可执行文件提供外部命令 `ksctl foo`：
 
@@ -287,8 +269,7 @@ ksctl plugin list
 ksctl foo --context prod
 ```
 
-插件参数必须位于插件名称之后。插件以你的用户权限运行，ksctl 不会审核或沙箱化插件；仅安装和
-运行你信任的插件。
+插件参数必须位于插件名称之后。插件以你的用户权限运行，ksctl 不会审核或沙箱化插件；仅安装和运行你信任的插件。
 
 ## 全局选项和环境变量
 
@@ -308,8 +289,7 @@ ksctl foo --context prod
 | `KS_ENDPOINT` | 提供默认 KubeSphere API 端点。 |
 | `KS_TOKEN` | 提供默认 KubeSphere 持有者令牌。 |
 
-显式参数优先于环境变量，环境变量优先于 Context 默认值（在支持该设置的位置）。子命令可定义
-额外参数，或为参数赋予特定于命令的含义。
+显式参数优先于环境变量，环境变量优先于 Context 默认值（在支持该设置的位置）。子命令可定义额外参数，或为参数赋予特定于命令的含义。
 
 ## 常用工作流
 
@@ -336,6 +316,7 @@ ksctl top pod -n demo --cluster member-1
 ksctl auth login
 ksctl auth whoami
 ksctl config current-context
+ksctl config use-context prod-admin
 ksctl get pods -A --cluster member-1
 ksctl tenant get workspace
 ksctl extension list --installed
@@ -355,10 +336,8 @@ ksctl api /kapis/version
 
 ### Metrics API 不可用
 
-`top` 要求所选 Cluster 中存在 Metrics Server 和可发现的 `metrics.k8s.io/v1beta1` APIService。请检查
-Metrics Server 部署、APIService 可用性和 `--cluster` 值。
+`top` 要求所选 Cluster 中存在 Metrics Server 和可发现的 `metrics.k8s.io/v1beta1` APIService。请检查 Metrics Server 部署、APIService 可用性和 `--cluster` 值。
 
 ### 使用 `--follow` 时日志流中断
 
-当服务器关闭流、用户取消流、请求失败或非零 `--request-timeout` 到期时，持续跟踪的日志流会结束。
-ksctl 不会重新连接或恢复该流。
+当服务器关闭流、用户取消流、请求失败或非零 `--request-timeout` 到期时，持续跟踪的日志流会结束。ksctl 不会重新连接或恢复该流。

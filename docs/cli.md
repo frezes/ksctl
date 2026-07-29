@@ -116,8 +116,8 @@ ksctl logs deployment/web -n demo --all-pods
 ksctl logs deployment/web -n demo --all-pods --follow
 ```
 
-The command reads the selected Cluster through the KubeSphere Endpoint. It
-does not search a logging extension or reconnect after a stream is
+The command reads logs from the selected Cluster through the KubeSphere
+Endpoint. It does not search a logging extension or reconnect after a stream is
 interrupted. Logs can contain sensitive data, so protect terminal captures and
 redirected files.
 
@@ -168,10 +168,10 @@ Workspace or tenant Cluster requests. Output can be `table`, `json`, or
 
 ## Manage extensions
 
-Extension resources are always managed on the KubeSphere host. The root
-`--cluster` and `--namespace` flags do not scope extension commands. Use
-extension placement flags to select member Clusters, or
-`diagnose --target-cluster` to inspect a member status.
+Extension resources are always managed on the KubeSphere host. A Context
+default Cluster is ignored, while explicitly passing the root `--cluster` or
+`--namespace` flag returns an error. Use extension placement flags to select
+member Clusters, or `diagnose --target-cluster` to inspect a member status.
 
 | Command | Purpose |
 | --- | --- |
@@ -304,6 +304,10 @@ ksctl api /kapis/version
 default to POST, and the response body is written unchanged. Run
 `ksctl api --help` before sending mutating requests.
 
+`API_PATH` is sent unchanged. Neither `--cluster`, `--namespace`, nor a Context
+default Cluster adds scope automatically. To target a member Cluster, include
+`/clusters/CLUSTER/...` in `API_PATH`.
+
 An executable named `ksctl-foo` provides the external command `ksctl foo`:
 
 ```bash
@@ -364,6 +368,7 @@ and manage an extension:
 ksctl auth login
 ksctl auth whoami
 ksctl config current-context
+ksctl config use-context prod-admin
 ksctl get pods -A --cluster member-1
 ksctl tenant get workspace
 ksctl extension list --installed
