@@ -14,6 +14,8 @@ type fakeAPIClient struct {
 	t testing.TB
 
 	extensions       List[Extension]
+	clusters         List[Cluster]
+	clusterErr       error
 	versions         map[string]List[ExtensionVersion]
 	versionObjects   map[string]Object[ExtensionVersion]
 	installPlans     List[InstallPlan]
@@ -181,6 +183,14 @@ func (f *fakeAPIClient) GetExtensionVersion(
 		return object, nil
 	}
 	return Object[ExtensionVersion]{}, notFound("extensionversions", name)
+}
+
+func (f *fakeAPIClient) ListClusters(context.Context) (List[Cluster], error) {
+	f.calls = append(f.calls, "list clusters")
+	if f.clusterErr != nil {
+		return List[Cluster]{}, f.clusterErr
+	}
+	return f.clusters, nil
 }
 
 func (f *fakeAPIClient) ListInstallPlans(context.Context) (List[InstallPlan], error) {

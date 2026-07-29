@@ -131,6 +131,7 @@ func newInstallCommand(
 	factory ServiceFactory,
 ) *cobra.Command {
 	var version string
+	var allClusters bool
 	var config configurationFlags
 	var wait waitFlags
 	command := &cobra.Command{
@@ -154,10 +155,11 @@ func newInstallCommand(
 				command.Context(),
 				args[0],
 				internalextension.InstallOptions{
-					Version:   version,
-					Config:    loaded.Config,
-					Clusters:  loaded.Clusters,
-					Overrides: loaded.Overrides,
+					Version:     version,
+					Config:      loaded.Config,
+					Clusters:    loaded.Clusters,
+					AllClusters: allClusters,
+					Overrides:   loaded.Overrides,
 				},
 			)
 			if err != nil {
@@ -182,6 +184,13 @@ func newInstallCommand(
 		"Exact extension version; defaults to status.recommendedVersion",
 	)
 	config.addInstall(command)
+	command.Flags().BoolVar(
+		&allClusters,
+		"all-clusters",
+		false,
+		"Install the extension agent on every ready, schedulable Fleet Cluster",
+	)
+	command.MarkFlagsMutuallyExclusive("clusters", "all-clusters")
 	wait.add(command)
 	return command
 }

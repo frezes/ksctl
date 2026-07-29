@@ -43,6 +43,31 @@ func writeJSONResponse(t *testing.T, response http.ResponseWriter, body string) 
 	}
 }
 
+func TestRESTClientListsFleetClusters(t *testing.T) {
+	var gotPath string
+	client := newTestAPIClient(t, http.HandlerFunc(func(
+		response http.ResponseWriter,
+		request *http.Request,
+	) {
+		gotPath = request.URL.Path
+		writeJSONResponse(t, response,
+			`{"apiVersion":"cluster.kubesphere.io/v1alpha1","kind":"ClusterList","items":[{"metadata":{"name":"host"},"status":{"conditions":[{"type":"KSCoreReady","status":"True"}]}}]}`,
+		)
+	}), nil)
+
+	clusters, err := client.ListClusters(context.Background())
+	if err != nil {
+		t.Fatalf("ListClusters() error = %v", err)
+	}
+	if gotPath != "/apis/cluster.kubesphere.io/v1alpha1/clusters" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if len(clusters.Items) != 1 ||
+		clusters.Items[0].Value.Metadata.Name != "host" {
+		t.Fatalf("clusters = %#v", clusters.Items)
+	}
+}
+
 func TestRESTClientUsesHostCatalogPathsAndSelectors(t *testing.T) {
 	var requests []string
 	client := newTestAPIClient(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

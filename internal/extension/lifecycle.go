@@ -34,10 +34,11 @@ type Operation struct {
 }
 
 type InstallOptions struct {
-	Version   string
-	Config    *string
-	Clusters  []string
-	Overrides map[string]string
+	Version     string
+	Config      *string
+	Clusters    []string
+	AllClusters bool
+	Overrides   map[string]string
 }
 
 type UpgradeOptions struct {
@@ -73,6 +74,25 @@ func (s *Service) Install(
 	version, err := s.exactVersion(ctx, name, options.Version)
 	if err != nil {
 		return Operation{}, err
+	}
+	if options.AllClusters {
+		if version.Value.Spec.InstallationMode != "Multicluster" {
+			return Operation{}, fmt.Errorf(
+				"extension version %q uses installation mode %q and does not accept --all-clusters",
+				options.Version,
+				valueOrNone(version.Value.Spec.InstallationMode),
+			)
+		}
+		clusters, err := s.client.ListClusters(ctx)
+		if err != nil {
+			return Operation{}, err
+		}
+		options.Clusters = eligibleClusterNames(clusters)
+		if len(options.Clusters) == 0 {
+			return Operation{}, fmt.Errorf(
+				"no ready, schedulable Clusters are available for --all-clusters",
+			)
+		}
 	}
 
 	config := ""
@@ -143,6 +163,41 @@ func (s *Service) Install(
 		acceptedSpec: cloneInstallPlanSpec(created.Value.Spec),
 		hasAccepted:  true,
 	}, nil
+}
+
+func clusterCondition(
+	cluster Cluster,
+	conditionType string,
+) (string, bool) {
+	for _, condition := range cluster.Status.Conditions {
+		if condition.Type == conditionType {
+			return condition.Status, true
+		}
+	}
+	return "", false
+}
+
+func eligibleClusterNames(clusters List[Cluster]) []string {
+	names := make([]string, 0, len(clusters.Items))
+	for _, item := range clusters.Items {
+		cluster := item.Value
+		if cluster.Metadata.DeletionTimestamp != nil {
+			continue
+		}
+		ready, found := clusterCondition(cluster, "KSCoreReady")
+		if !found || ready != "True" {
+			continue
+		}
+		if schedulable, found := clusterCondition(
+			cluster,
+			"Schedulable",
+		); found && schedulable == "False" {
+			continue
+		}
+		names = append(names, cluster.Metadata.Name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (s *Service) Upgrade(

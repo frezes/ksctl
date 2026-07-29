@@ -184,6 +184,70 @@ func TestInstallPassesEmptyVersionForServiceResolution(t *testing.T) {
 	}
 }
 
+func TestInstallPassesAllClustersToService(t *testing.T) {
+	streams, _, _ := bufferedStreams()
+	var got internalextension.InstallOptions
+	service := &fakeService{installFn: func(
+		_ context.Context,
+		_ string,
+		options internalextension.InstallOptions,
+	) (internalextension.Operation, error) {
+		got = options
+		return internalextension.Operation{
+			Kind:          internalextension.OperationInstall,
+			Name:          "demo",
+			TargetVersion: "1.2.1",
+		}, nil
+	}}
+	err := executeExtensionCommand(
+		t,
+		[]string{
+			"extension", "install", "demo",
+			"--version", "1.2.1",
+			"--all-clusters",
+		},
+		streams,
+		func() (Service, error) { return service, nil },
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !got.AllClusters {
+		t.Fatalf("AllClusters = false, want true")
+	}
+}
+
+func TestInstallRejectsAllClustersWithExplicitClustersBeforeFactory(
+	t *testing.T,
+) {
+	streams, out, _ := bufferedStreams()
+	called := false
+	err := executeExtensionCommand(
+		t,
+		[]string{
+			"extension", "install", "demo",
+			"--version", "1.2.1",
+			"--clusters", "member-a",
+			"--all-clusters",
+		},
+		streams,
+		func() (Service, error) {
+			called = true
+			return &fakeService{}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "clusters") ||
+		!strings.Contains(err.Error(), "all-clusters") {
+		t.Fatalf("Execute() error = %v, want both flag names", err)
+	}
+	if called {
+		t.Fatal("service factory was called")
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q", out.String())
+	}
+}
+
 func TestInstallDefaultsToAsyncAndPassesExactInputs(t *testing.T) {
 	configPath := writeInputFile(t, "config.yaml", "key: value\r\n")
 	overridePath := writeInputFile(t, "override.yaml", "key: member\n")

@@ -27,6 +27,22 @@ type Condition struct {
 	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 }
 
+type ClusterCondition struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
+}
+
+type ClusterStatus struct {
+	Conditions []ClusterCondition `json:"conditions,omitempty"`
+}
+
+type Cluster struct {
+	APIVersion string        `json:"apiVersion,omitempty"`
+	Kind       string        `json:"kind,omitempty"`
+	Metadata   ObjectMeta    `json:"metadata"`
+	Status     ClusterStatus `json:"status,omitempty"`
+}
+
 type Provider struct {
 	Name  string `json:"name,omitempty"`
 	URL   string `json:"url,omitempty"`
