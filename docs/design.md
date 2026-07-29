@@ -11,7 +11,8 @@ are not the current architecture reference.
   resources exposed through KubeSphere.
 - Preserve familiar kubectl `get` and `describe` syntax, discovery, selection,
   printing, watching, describing, and error behavior.
-- Keep the built-in resource surface read-only.
+- Keep the generic built-in resource surface read-only, with one explicit,
+  controlled extension-lifecycle exception.
 - Support interactive use and explicit, predictable automation.
 - Use the KubeSphere API Endpoint and credentials without reading or changing
   the user's kubeconfig.
@@ -22,8 +23,8 @@ are not the current architecture reference.
 
 ## Non-goals
 
-- Built-in create, update, edit, patch, delete, apply, or other resource
-  mutation commands
+- Generic built-in create, update, edit, patch, delete, apply, or other
+  resource mutation commands outside the purpose-built extension workflow
 - A local reimplementation or fork of kubectl resource parsing, printers,
   watchers, or Describers
 - Reading, merging, or writing `~/.kube/config`
@@ -50,7 +51,7 @@ show `kubectl ks`; command behavior and options otherwise remain shared.
 
 The root owns KubeSphere connection flags and constructs these command groups:
 
-- ksctl-owned `auth`, `config`, `plugin`, and `version` commands;
+- ksctl-owned `auth`, `config`, `extension`, `plugin`, and `version` commands;
 - kubectl-owned `get` and `describe` commands; and
 - Cobra-provided help, completion, and shell-completion commands.
 
@@ -157,6 +158,70 @@ retrieval, with either a generated HTTP client or an injected client for tests.
 selected Cluster, and selected username. Unlike the Kubernetes getter, its base
 REST config keeps the Fleet Endpoint unscoped; a KubeSphere-native request adds
 Cluster scope explicitly when its API supports it.
+
+## Extension management
+
+Extension management is the deliberate controlled-write exception to the
+otherwise read-only built-in resource surface. It owns only
+`kubesphere.io/v1alpha1` Extension, ExtensionVersion, and InstallPlan
+workflows; it does not expose generic mutation verbs.
+
+Responsibilities are split at a narrow boundary:
+
+```text
+pkg/cmd/extension
+  Cobra flags, local file/stdin input, stable tables, lifecycle messages
+  and command-specific scope rejection
+
+internal/extension
+  private wire models, host REST paths, catalog joins, dependency validation,
+  guarded lifecycle writes, stale-safe waiting, and diagnosis
+```
+
+The wire models intentionally remain private and retain each complete raw JSON
+document. Table output reads known fields, while JSON and YAML output preserve
+unknown server fields for forward compatibility.
+
+All extension catalog and InstallPlan requests use the host KubeSphere
+Endpoint. A dedicated connection getter ignores a Context's `defaultCluster`;
+explicit root `--cluster` and `--namespace` flags are rejected before
+connection resolution. Multicluster placement is expressed in the InstallPlan
+with `--clusters` and overrides. `diagnose --target-cluster` selects a member's
+status from the host InstallPlan, but the referenced Namespace, Job, and Pods
+are still read through host `/api/v1` and `/apis/batch/v1` paths.
+
+Install creates an enabled InstallPlan with `upgradeStrategy: Manual`. Upgrade
+and configure send minimal JSON Merge Patches guarded by the current
+`metadata.resourceVersion`; conflicts are returned instead of retrying changed
+intent. Exact ExtensionVersion values remain opaque, but controller-facing
+operations directly require the resource identity `<extension>-<version>`.
+Required dependencies are validated without automatic installation.
+
+Lifecycle writes are asynchronous unless `--wait` is explicit. The waiter
+uses the accepted create or patch response as a target-local baseline, so a
+stale pre-existing terminal status is not attributed to the new operation.
+Host and member targets advance independently, effective configuration hashes
+match the KubeSphere controller's merge semantics, and removed member failures
+remain actionable. Clearing scheduling uses an explicit empty placement so the
+controller performs member cleanup. Uninstall succeeds only when the
+InstallPlan becomes NotFound. Accepted specs and object identities are fenced
+so a dropped admission change, concurrent mutation, deletion, or same-name
+recreation cannot be reported as the original operation's success.
+
+Diagnosis validates the controller's exact target ExtensionVersion and reports
+controller state, conditions, dependencies, Namespace, Job, Pod terminations,
+member statuses, and limited timestamp evidence. Completed retrying Jobs and
+recovered container history are distinguished from current failures. It
+suggests follow-up `kubectl logs` commands but does not retrieve logs, Secrets,
+or Helm values.
+
+Human-readable extension output escapes terminal control data. Extension
+commands also reject REST debug verbosity `--v=8` and higher because that
+client level may log InstallPlan configuration bodies.
+
+Because `extension` is built in, plugin executables named `ksctl-extension` or
+nested beneath that path cannot override or extend it. Plugin listing reports
+those executables as built-in command conflicts.
 
 ## Configuration model
 
