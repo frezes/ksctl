@@ -612,6 +612,7 @@ func TestExtensionIntegration(t *testing.T) {
 				"demo",
 				"--target-cluster",
 				"member-a",
+				"--verbose",
 			)...,
 		)
 		if err != nil {
