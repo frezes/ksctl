@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add host-scoped `extension` discovery, exact-version lifecycle management,
+  configuration, multicluster placement, waiting, status, and diagnosis.
 - Revoke cached Access Tokens through the KubeSphere logout endpoint on a
   best-effort basis before clearing local login state.
 - Add `auth whoami` to verify the selected KubeSphere credential and display

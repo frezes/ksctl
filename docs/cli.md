@@ -3,9 +3,11 @@
 ## Overview
 
 `ksctl` is a command-line client for inspecting KubeSphere 4.x resources and
-the Kubernetes resources exposed through KubeSphere. Its built-in resource
-commands are read-only: `get` displays resources and `describe` displays their
-detailed state.
+the Kubernetes resources exposed through KubeSphere. Its generic built-in
+resource commands are read-only: `get` displays resources, `describe` displays
+their detailed state, `logs` reads container logs, and `top` displays current
+Metrics Server CPU/memory usage. The purpose-built `extension` group is the
+controlled exception for KubeSphere extension lifecycle management.
 
 The release provides two equivalent entrypoints backed by the same command
 tree:
@@ -22,23 +24,23 @@ using the kubectl plugin.
 
 - A reachable KubeSphere 4.x API endpoint
 - A KubeSphere account or bearer token
+- Metrics Server with `metrics.k8s.io/v1beta1` for `top` commands
 - The `ksctl` executable, or the `kubectl-ks` executable on `PATH` for use as
   `kubectl ks`
 
 ## Command syntax
 
-Resource commands use this general syntax:
-
 ```text
-ksctl COMMAND TYPE [NAME] [flags]
+ksctl get TYPE [NAME] [flags]
+ksctl describe TYPE [NAME_PREFIX] [flags]
+ksctl logs (POD | TYPE/NAME) [flags]
+ksctl top (pod | node) [NAME] [flags]
 ```
 
-- `COMMAND` is `get` or `describe`.
-- `TYPE` is a resource type advertised by server discovery. Singular, plural,
-  short, versioned, and group-qualified names are accepted when advertised.
-- `NAME` selects one resource. Omit it to select a list, or use the forms shown
-  by the command-specific help.
-- Flags select a connection and scope, filter resources, or change output.
+Resource names are resolved from server discovery. Singular, plural, short,
+versioned, and group-qualified names are accepted where the selected kubectl
+command supports them. Use command-specific help for exact arguments and
+flags.
 
 Use built-in help to inspect the live command surface:
 
@@ -54,6 +56,8 @@ ksctl config generate kubeconfig --help
 | --- | --- |
 | `ksctl get TYPE [NAME]` | Display one or more resources. |
 | `ksctl describe TYPE [NAME_PREFIX]` | Display resource details and related information. |
+| `ksctl logs (POD \| TYPE/NAME)` | Print or follow logs from one or more Pod containers. |
+| `ksctl top (pod \| node) [NAME]` | Display current Metrics Server CPU/memory usage. |
 | `ksctl auth login [ENDPOINT]` | Authenticate with a username and password, then save a Context and token cache. |
 | `ksctl auth whoami` | Verify the selected credential and display the server-side User and global role. |
 | `ksctl auth logout [CONTEXT]` | Delete cached login credentials for the current or named Context. |
@@ -61,6 +65,7 @@ ksctl config generate kubeconfig --help
 | `ksctl config current-context` | Display the current Context name. |
 | `ksctl config use-context NAME` | Select an existing Context. |
 | `ksctl config generate kubeconfig` | Write the selected user's kubeconfig to stdout. |
+| `ksctl extension` | Discover, install, configure, diagnose, and remove KubeSphere extensions. |
 | `ksctl plugin list` | List and diagnose `ksctl-*` executable plugins on `PATH`. |
 | `ksctl completion SHELL` | Generate a completion script for bash, fish, PowerShell, or zsh. |
 | `ksctl version` | Display the ksctl, KubeSphere, and Kubernetes versions. |
@@ -180,6 +185,189 @@ must be paired with an explicit `--token` or `KS_TOKEN`; ksctl never combines
 an overridden Endpoint with credentials from the selected Context. Supplying
 only `KS_TOKEN` is valid when a Context supplies the Endpoint.
 
+## Manage extensions
+
+The extension workflow is available through both `ksctl extension` and
+`kubectl ks extension`:
+
+```text
+ksctl extension list [--category CATEGORY] [--installed] [-o table|wide|json|yaml]
+ksctl extension show NAME [--version VERSION] [-o table|wide|json|yaml]
+ksctl extension versions NAME [-o table|json|yaml]
+ksctl extension status [NAME] [--watch] [--wait-timeout 10m]
+ksctl extension install NAME [--version VERSION] [--all-clusters]
+ksctl extension upgrade NAME --version VERSION [configuration flags] [--wait]
+ksctl extension configure NAME [configuration flags] [--wait]
+ksctl extension uninstall NAME [--wait]
+ksctl extension diagnose NAME [--target-cluster CLUSTER] [--verbose]
+```
+
+Extension resources are always managed on the KubeSphere host. A Context's
+`defaultCluster` does not route these requests, and extension commands reject
+the root `--cluster` and `--namespace` flags. Use `--clusters` to define
+extension placement and `diagnose --target-cluster` to select a member status.
+Even for a selected member status, diagnosis reads the controller Job and Pods
+from the host.
+
+### Discover and inspect
+
+List the catalog, filter it, inspect one extension, or display its exact
+versions:
+
+```bash
+ksctl extension list
+ksctl extension list --category observability --installed
+ksctl extension list -o wide
+ksctl extension show logging
+ksctl extension show logging -o wide
+ksctl extension show logging --version 1.2.1
+ksctl extension versions logging
+ksctl extension status
+ksctl extension status logging
+ksctl extension status logging --watch --wait-timeout 10m
+```
+
+JSON and YAML preserve complete server objects, including fields unknown to
+this ksctl release. The default `list` table is concise (`NAME`, `CATEGORY`,
+`RECOMMENDED`, `INSTALLED`, and `STATE`); `list -o wide` additionally shows
+`PROVIDER` and `ENABLED`. The default `show` table similarly omits empty
+optional fields, while `show -o wide` retains its complete detailed field set,
+including observed `INSTALLED` and requested `TARGET` versions. `show NAME
+--version VERSION` continues to show the selected exact-version details.
+`status --watch` requires a name and table output.
+
+### Install and upgrade versions
+
+Install defaults to the Extension's current `status.recommendedVersion` when
+`--version` is omitted; pass a non-empty `--version` to select a different
+exact, opaque version. Upgrade always requires an exact `--version`. ksctl
+never rewrites a `v` prefix. The
+KubeSphere controller requires the corresponding ExtensionVersion resource to
+be named exactly `<extension>-<version>`, and ksctl verifies that identity
+directly:
+
+```bash
+ksctl extension install logging
+ksctl extension install logging --version 1.2.1
+ksctl extension upgrade logging --version 1.3.0
+```
+
+Lifecycle commands are asynchronous by default. After the API accepts a
+request, they print one `requested` line and return. Add `--wait` to poll for
+completion; `--wait-timeout` defaults to 10 minutes and is valid only with
+`--wait`:
+
+```bash
+ksctl extension install logging --version 1.2.1 --wait
+ksctl extension upgrade logging --version 1.3.0 \
+  --wait --wait-timeout 20m
+```
+
+Before install or upgrade, ksctl verifies all required extension dependencies.
+It reports an unmet dependency and does not create dependency InstallPlans
+automatically.
+
+### Configuration and multicluster placement
+
+Read global configuration from a file or stdin:
+
+```bash
+ksctl extension install logging --version 1.2.1 \
+  --config ./logging-values.yaml
+
+generate-values | ksctl extension configure logging --config -
+```
+
+Place a multicluster extension explicitly and add repeatable per-Cluster
+overrides:
+
+```bash
+ksctl extension install logging --version 1.2.1 \
+  --clusters member-a,member-b \
+  --override member-a=./member-a.yaml \
+  --override member-b=./member-b.yaml
+```
+
+For a multicluster extension, `--all-clusters` selects the current eligible
+snapshot from host `Clusters`: every non-deleting Cluster with `KSCoreReady`
+true and no explicit `Schedulable=False` condition. ksctl writes that resolved
+list to the InstallPlan; it does not leave a dynamic all-cluster selector.
+The resolved snapshot includes the host Cluster when it satisfies the same
+eligibility conditions; the KubeSphere controller remains responsible for
+host handling.
+
+```bash
+ksctl extension install logging --all-clusters
+```
+
+Upgrade can change configuration and placement in the same guarded update:
+
+```bash
+ksctl extension upgrade logging --version 1.3.0 \
+  --config ./logging-v1.3.yaml \
+  --clusters member-a,member-c \
+  --override member-c=./member-c.yaml
+```
+
+Configure keeps the current exact version. Omitted fields are preserved;
+positive and clear flags for one field are mutually exclusive:
+
+```bash
+ksctl extension configure logging --config ./logging-values.yaml
+ksctl extension configure logging --remove-override member-b
+ksctl extension configure logging --clear-config
+ksctl extension configure logging --clear-cluster-scheduling
+```
+
+At most one `--config` or `--override` input may read stdin during one
+invocation. Configuration and overrides must be non-empty, single-document
+YAML mappings with no duplicate keys. Existing retained values are validated
+too. ksctl applies the same per-line trailing-whitespace normalization as the
+KubeSphere InstallPlan admission webhook. Cluster names must be DNS-1123
+subdomains.
+
+With `--wait`, placement replacement waits for new members and removal of old
+member agents. `--clear-cluster-scheduling --wait` likewise waits until all
+previous member statuses disappear. Dynamic selector-only placement cannot be
+tracked deterministically, so `--wait` requires replacing it with
+`--clusters` first.
+
+### Uninstall and diagnose
+
+Uninstall deletes the InstallPlan directly without an interactive
+confirmation. The default returns after deletion is accepted; `--wait` polls
+until the InstallPlan is gone:
+
+```bash
+ksctl extension uninstall logging
+ksctl extension uninstall logging --wait
+```
+
+Diagnosis prints ordered checks for the Extension, InstallPlan, exact version,
+dependencies, target Namespace, controller Job, Pods, member statuses, and
+timestamp consistency:
+
+```bash
+ksctl extension diagnose logging
+ksctl extension diagnose logging --target-cluster member-a
+ksctl extension diagnose logging --verbose
+```
+
+For a complete healthy diagnosis, default output is a one-line health summary.
+Otherwise it prints only `WARN` and `ERROR` rows in order followed by status
+counts. `--verbose` prints every completed check and the same summary. If a
+service error interrupts diagnosis, ksctl prints the completed checks and an
+`incomplete` marker before returning that error.
+
+Diagnosis never retrieves logs, Secrets, or rendered Helm values. When further
+inspection is useful, it prints a `kubectl logs` command for the user to run.
+Warnings do not fail diagnosis; definite `ERROR` checks produce a non-zero
+exit status after the check table is printed.
+
+Extension commands reject `--v=8` and higher because the underlying
+KubeSphere REST client's debug logging can expose InstallPlan configuration.
+Use `--v=7` or lower.
+
 ## Configuration and credentials
 
 ### Configuration file
@@ -297,6 +485,44 @@ ksctl describe pod/web-0 -n demo --cluster member-1
 `ksctl describe --help`. It does not support structured `-o` output; use `get`
 for that.
 
+### Read container logs
+
+`logs` uses kubectl v0.36.2's Pod Logs behavior. It can read a Pod directly or
+resolve a workload to its Pods:
+
+```bash
+ksctl logs pod/web-0 -n demo
+ksctl logs deployment/web -n demo --all-pods
+ksctl logs deployment/web -n demo --all-pods --all-containers --prefix
+ksctl logs pod/web-0 -n demo -c app --previous
+ksctl logs pod/web-0 -n demo --tail=100 --since=1h
+ksctl logs pod/web-0 -n demo --follow
+```
+
+Logs are read from the selected Kubernetes Cluster through the KubeSphere
+Endpoint. The built-in command does not search a logging extension, retain
+history, reconnect a failed stream, or combine results from multiple Clusters.
+Application logs can contain credentials or other sensitive data; protect
+terminal capture and redirected files accordingly.
+
+### View current resource usage
+
+`top` reads the Kubernetes Metrics API. Metrics Server must expose
+`metrics.k8s.io/v1beta1` in the selected Cluster:
+
+```bash
+ksctl top pod -n demo
+ksctl top pod -A --sort-by=cpu
+ksctl top pod web-0 -n demo --containers
+ksctl top node
+ksctl top node worker-0 --show-capacity
+```
+
+`top pod` is namespaced and supports `-A`; `top node` is Cluster-scoped. The
+reported values are the recent signals used by Kubernetes autoscaling, not
+historical monitoring data. ksctl does not fall back to a KubeSphere
+monitoring extension.
+
 ### Select scope
 
 ```bash
@@ -304,6 +530,9 @@ ksctl get pods -n demo
 ksctl get pods -A
 ksctl get pods -A --cluster member-1
 ksctl describe deployment web -n demo --cluster member-1
+ksctl logs deployment/web -n demo --all-pods --cluster member-1
+ksctl top pod -n demo --cluster member-1
+ksctl top node --cluster member-1
 ```
 
 ### Filter, sort, and watch
@@ -317,8 +546,8 @@ ksctl get pods --sort-by=.metadata.name
 ksctl get pods --watch
 ```
 
-Run `ksctl get --help` and `ksctl describe --help` for their complete command
-flags.
+Run `ksctl get --help`, `ksctl describe --help`, `ksctl logs --help`, and
+`ksctl top --help` for the complete command-specific flags.
 
 ### Select output
 
@@ -464,6 +693,18 @@ ksctl get workspaces
   Namespace or Project.
 - A login-required error means no usable explicit, configured, or cached
   credential was found for the selected connection.
+
+### `Metrics API not available`
+
+`top` requires Metrics Server and a discoverable `metrics.k8s.io/v1beta1`
+APIService in the selected Cluster. Verify the Metrics Server deployment,
+APIService availability, and the selected `--cluster`.
+
+### Logs stop during `--follow`
+
+A followed log stream ends when the server closes it, the user cancels it, an
+unignored request error occurs, or an explicit nonzero `--request-timeout`
+expires. ksctl does not reconnect or resume the stream.
 
 Avoid `ksctl config view --raw` during routine troubleshooting because its
 output can contain credentials and TLS private key data.

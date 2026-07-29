@@ -105,6 +105,37 @@ func TestPluginListPrintsFullPathsByDefault(t *testing.T) {
 	}
 }
 
+func TestPluginListReportsExtensionAsBuiltInConflict(t *testing.T) {
+	directory := t.TempDir()
+	writeCandidate(t, directory, "ksctl-extension", 0o755)
+	writeCandidate(t, directory, "ksctl-extension-install", 0o755)
+	out := new(bytes.Buffer)
+	errOut := new(bytes.Buffer)
+	root := &cobra.Command{Use: "ksctl"}
+	extension := &cobra.Command{Use: "extension"}
+	extension.AddCommand(&cobra.Command{Use: "install"})
+	root.AddCommand(extension)
+	root.AddCommand(NewCommand(
+		"ksctl",
+		genericiooptions.IOStreams{Out: out, ErrOut: errOut},
+	))
+	root.SetArgs([]string{"plugin", "list", "--name-only"})
+	t.Setenv("PATH", directory)
+
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "2 plugin warnings") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{
+		`ksctl-extension overwrites existing command: "ksctl extension"`,
+		`ksctl-extension-install overwrites existing command: "ksctl extension install"`,
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want %q", errOut.String(), want)
+		}
+	}
+}
+
 func TestPluginListReturnsErrorWhenEmpty(t *testing.T) {
 	out := new(bytes.Buffer)
 	errOut := new(bytes.Buffer)

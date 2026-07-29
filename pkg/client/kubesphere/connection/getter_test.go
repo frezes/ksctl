@@ -168,6 +168,76 @@ func TestRESTClientGetterRejectsInvalidClusterBeforeResolvingToken(t *testing.T)
 	}
 }
 
+func TestRESTClientGetterHostPolicyIgnoresContextDefaultCluster(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.New()
+	cfg.CurrentContext = "local"
+	cfg.Fleets["local"] = config.Fleet{
+		Host: "https://ks.example.com",
+		Users: map[string]config.User{
+			"admin": {BearerToken: "secret"},
+		},
+	}
+	cfg.Contexts["local"] = config.Context{
+		Fleet:          "local",
+		User:           "admin",
+		DefaultCluster: "invalid/member",
+	}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	provider := &recordingTokenProvider{}
+	getter := NewRESTClientGetter(
+		&clientoptions.Options{ConfigPath: path},
+		Dependencies{
+			TokenProvider:        provider,
+			IgnoreDefaultCluster: true,
+		},
+	)
+	if _, err := getter.ToRESTConfig(); err != nil {
+		t.Fatalf("ToRESTConfig() error = %v", err)
+	}
+	cluster, err := getter.KubeSphereCluster()
+	if err != nil || cluster != "" {
+		t.Fatalf("KubeSphereCluster() = %q, %v, want empty", cluster, err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("Token() calls = %d, want 1", provider.calls)
+	}
+}
+
+func TestRESTClientGetterHostPolicyPreservesExplicitCluster(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, config.New()); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	provider := &recordingTokenProvider{}
+	getter := NewRESTClientGetter(
+		&clientoptions.Options{
+			ConfigPath: path,
+			Endpoint:   "https://ks.example.com",
+			Token:      "explicit-token",
+			Cluster:    "explicit-member",
+		},
+		Dependencies{
+			TokenProvider:        provider,
+			IgnoreDefaultCluster: true,
+		},
+	)
+	if _, err := getter.ToRESTConfig(); err != nil {
+		t.Fatalf("ToRESTConfig() error = %v", err)
+	}
+	cluster, err := getter.KubeSphereCluster()
+	if err != nil || cluster != "explicit-member" {
+		t.Fatalf(
+			"KubeSphereCluster() = %q, %v, want explicit-member",
+			cluster,
+			err,
+		)
+	}
+}
+
 type recordingTokenProvider struct {
 	calls int
 }

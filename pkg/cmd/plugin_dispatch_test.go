@@ -82,12 +82,17 @@ func TestDispatchPluginDoesNotOverrideOrExtendBuiltIns(t *testing.T) {
 		{"ksctl", "version", "extra"},
 		{"ksctl", "auth", "missing"},
 		{"ksctl", "auth", "login", "one", "two"},
+		{"ksctl", "extension"},
+		{"ksctl", "extension", "install"},
+		{"ksctl", "extension", "missing"},
 	}
 	for _, arguments := range cases {
 		handler := &recordingPluginHandler{paths: map[string]string{
-			"version":    "/plugins/ksctl-version",
-			"auth":       "/plugins/ksctl-auth",
-			"auth-login": "/plugins/ksctl-auth-login",
+			"version":           "/plugins/ksctl-version",
+			"auth":              "/plugins/ksctl-auth",
+			"auth-login":        "/plugins/ksctl-auth-login",
+			"extension":         "/plugins/ksctl-extension",
+			"extension-install": "/plugins/ksctl-extension-install",
 		}}
 		root := NewRootCommand(IOStreams{}, VersionInfo{Version: "test"})
 		if err := dispatchPlugin(root, arguments, handler); err != nil {
