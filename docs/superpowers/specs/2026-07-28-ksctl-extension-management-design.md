@@ -24,7 +24,7 @@ This change adds:
 
 ```text
 ksctl extension list
-ksctl extension show NAME [-o table|wide|json|yaml]
+ksctl extension show NAME [--version VERSION] [-o table|wide|json|yaml]
 ksctl extension versions NAME
 ksctl extension status [NAME]
 ksctl extension install NAME [--version VERSION] [--all-clusters]
@@ -185,21 +185,40 @@ as installed.
 Default columns:
 
 ```text
-NAME  CATEGORY  RECOMMENDED  INSTALLED  TARGET  STATE
+NAME  CATEGORY  RECOMMENDED  INSTALLED  STATE
 ```
 
-Wide output adds provider and enabled state when available. Table rows are
-sorted by extension name. `INSTALLED` is an observed successful version and
-never falls back to `spec.extension.version`; `TARGET` is the requested spec
-version.
+Wide output adds provider and enabled state when available:
+
+```text
+NAME  CATEGORY  RECOMMENDED  INSTALLED  STATE  PROVIDER  ENABLED
+```
+
+Table rows are sorted by extension name. `INSTALLED` is an observed successful
+version and never falls back to `spec.extension.version`. The requested target
+version remains available from status and structured resources, but is not
+rendered by `extension list` in either table mode.
 
 ### `extension show`
 
 `show NAME` displays extension metadata, available and installed versions,
 state, conditions, provider information, and descriptions. It accepts
 `-o table|wide|json|yaml`; `--version VERSION` selects exact version details.
+The default table shows only non-empty concise fields:
 
-The default field order for an Extension is:
+```text
+Name
+Display Name
+Description
+Category
+State
+Installed Version
+Recommended Version
+```
+
+`Name` is always present; missing optional fields are omitted. Wide output
+retains the complete detailed field set and renders unavailable detailed values
+as `<none>`:
 
 ```text
 Name
@@ -215,6 +234,11 @@ Recommended Version
 Versions
 Conditions
 ```
+
+When an InstallPlan contains member scheduling status, both table modes append
+a titled `clusterSchedulingStatuses` section. Its default columns are
+`CLUSTER`, `VERSION`, and `STATE`; wide output also includes `NAMESPACE` and
+`JOB`. Rows are sorted by Cluster name.
 
 `show NAME --version VERSION` displays exact version details, including:
 
@@ -351,8 +375,9 @@ Install does not expose clearing flags because no prior InstallPlan exists.
 
 1. Validate arguments, scope flags, local files, and flag combinations.
 2. Get the named Extension.
-3. Use `status.recommendedVersion` when `--version` is omitted, then get the
-   exact selected ExtensionVersion.
+3. Use `status.recommendedVersion` only when `--version` is omitted, then get
+   the exact selected ExtensionVersion. An explicit empty or whitespace-only
+   `--version` is rejected before service construction.
 4. Validate installation mode and scheduling inputs.
 5. Validate required external dependencies.
 6. Confirm that no same-name InstallPlan exists.
@@ -656,7 +681,8 @@ Human-readable query output is deterministic:
 
 - stable column names;
 - stable name or version ordering;
-- `<none>` for missing scalar values; and
+- `<none>` for unavailable wide and exact-version scalar values, while the
+  concise `show` table omits empty optional fields; and
 - one final newline.
 
 JSON output is valid JSON followed by a newline. YAML output is converted from

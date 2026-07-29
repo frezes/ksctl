@@ -51,7 +51,7 @@ func TestRESTClientListsFleetClusters(t *testing.T) {
 	) {
 		gotPath = request.URL.Path
 		writeJSONResponse(t, response,
-			`{"apiVersion":"cluster.kubesphere.io/v1alpha1","kind":"ClusterList","items":[{"metadata":{"name":"host"},"status":{"conditions":[{"type":"KSCoreReady","status":"True"}]}}]}`,
+			`{"apiVersion":"cluster.kubesphere.io/v1alpha1","kind":"ClusterList","items":[{"metadata":{"name":"host"},"status":{"conditions":[{"type":"KSCoreReady","status":"True"}]}},{"metadata":{"name":"deleting","deletionTimestamp":"2026-07-29T12:34:56Z"},"status":{"conditions":[{"type":"KSCoreReady","status":"False"}]}}]}`,
 		)
 	}), nil)
 
@@ -62,9 +62,24 @@ func TestRESTClientListsFleetClusters(t *testing.T) {
 	if gotPath != "/apis/cluster.kubesphere.io/v1alpha1/clusters" {
 		t.Fatalf("path = %q", gotPath)
 	}
-	if len(clusters.Items) != 1 ||
+	if len(clusters.Items) != 2 ||
 		clusters.Items[0].Value.Metadata.Name != "host" {
 		t.Fatalf("clusters = %#v", clusters.Items)
+	}
+	condition := clusters.Items[0].Value.Status.Conditions[0]
+	if condition.Type != "KSCoreReady" || condition.Status != "True" {
+		t.Fatalf("host condition = %#v", condition)
+	}
+	deleting := clusters.Items[1].Value
+	if deleting.Metadata.Name != "deleting" ||
+		deleting.Metadata.DeletionTimestamp == nil ||
+		deleting.Metadata.DeletionTimestamp.Time.UTC().Format(time.RFC3339) !=
+			"2026-07-29T12:34:56Z" {
+		t.Fatalf("deleting cluster = %#v", deleting)
+	}
+	condition = deleting.Status.Conditions[0]
+	if condition.Type != "KSCoreReady" || condition.Status != "False" {
+		t.Fatalf("deleting condition = %#v", condition)
 	}
 }
 

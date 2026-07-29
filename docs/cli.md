@@ -178,7 +178,7 @@ The extension workflow is available through both `ksctl extension` and
 
 ```text
 ksctl extension list [--category CATEGORY] [--installed] [-o table|wide|json|yaml]
-ksctl extension show NAME [-o table|wide|json|yaml]
+ksctl extension show NAME [--version VERSION] [-o table|wide|json|yaml]
 ksctl extension versions NAME [-o table|json|yaml]
 ksctl extension status [NAME] [--watch] [--wait-timeout 10m]
 ksctl extension install NAME [--version VERSION] [--all-clusters]
@@ -214,14 +214,20 @@ ksctl extension status logging --watch --wait-timeout 10m
 ```
 
 JSON and YAML preserve complete server objects, including fields unknown to
-this ksctl release. Table output keeps observed `INSTALLED` and requested
-`TARGET` versions separate. `status --watch` requires a name and table output.
+this ksctl release. The default `list` table is concise (`NAME`, `CATEGORY`,
+`RECOMMENDED`, `INSTALLED`, and `STATE`); `list -o wide` additionally shows
+`PROVIDER` and `ENABLED`. The default `show` table similarly omits empty
+optional fields, while `show -o wide` retains its complete detailed field set,
+including observed `INSTALLED` and requested `TARGET` versions. `show NAME
+--version VERSION` continues to show the selected exact-version details.
+`status --watch` requires a name and table output.
 
 ### Install and upgrade versions
 
-Install defaults to the Extension's current `status.recommendedVersion`; pass
-`--version` to select a different exact, opaque version. Upgrade always
-requires an exact `--version`. ksctl never rewrites a `v` prefix. The
+Install defaults to the Extension's current `status.recommendedVersion` when
+`--version` is omitted; pass a non-empty `--version` to select a different
+exact, opaque version. Upgrade always requires an exact `--version`. ksctl
+never rewrites a `v` prefix. The
 KubeSphere controller requires the corresponding ExtensionVersion resource to
 be named exactly `<extension>-<version>`, and ksctl verifies that identity
 directly:

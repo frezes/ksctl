@@ -135,11 +135,15 @@ func newInstallCommand(
 	var config configurationFlags
 	var wait waitFlags
 	command := &cobra.Command{
-		Use:     "install NAME",
-		Short:   "Install a KubeSphere extension",
-		Example: parent + " extension install NAME [--version VERSION]",
-		Args:    exactExtensionNameArgs,
+		Use:   "install NAME",
+		Short: "Install a KubeSphere extension",
+		Example: parent + " extension install NAME\n" +
+			parent + " extension install NAME --all-clusters",
+		Args: exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
+			if command.Flags().Changed("version") && strings.TrimSpace(version) == "" {
+				return fmt.Errorf("--version requires a non-empty exact version")
+			}
 			if err := wait.validate(command); err != nil {
 				return err
 			}
