@@ -383,7 +383,9 @@ multicluster ExtensionVersion, it lists host `Clusters`, includes every
 non-deleting Cluster with `KSCoreReady=True` and without
 `Schedulable=False`, and writes that current eligible snapshot as the explicit
 InstallPlan placement. It rejects non-multicluster versions and an empty
-eligible snapshot.
+eligible snapshot. The resolved snapshot includes the host Cluster when it
+satisfies the same eligibility conditions; the KubeSphere controller remains
+responsible for host handling.
 
 ## Upgrade Workflow
 

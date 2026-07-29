@@ -201,7 +201,9 @@ Install uses the Extension's current `status.recommendedVersion` when
 `--version` is omitted; upgrade still requires an explicit exact version. For
 a multicluster install, `--all-clusters` lists host `Clusters`, selects the
 current ready and schedulable set, and writes that resolved eligible snapshot
-as explicit placement rather than a dynamic selector.
+as explicit placement rather than a dynamic selector. The snapshot includes
+the host Cluster when it satisfies the same conditions; the KubeSphere
+controller remains responsible for host handling.
 
 Lifecycle writes are asynchronous unless `--wait` is explicit. The waiter
 uses the accepted create or patch response as a target-local baseline, so a

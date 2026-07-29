@@ -272,6 +272,9 @@ For a multicluster extension, `--all-clusters` selects the current eligible
 snapshot from host `Clusters`: every non-deleting Cluster with `KSCoreReady`
 true and no explicit `Schedulable=False` condition. ksctl writes that resolved
 list to the InstallPlan; it does not leave a dynamic all-cluster selector.
+The resolved snapshot includes the host Cluster when it satisfies the same
+eligibility conditions; the KubeSphere controller remains responsible for
+host handling.
 
 ```bash
 ksctl extension install logging --all-clusters
