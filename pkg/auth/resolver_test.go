@@ -32,6 +32,84 @@ func TestResolvePrefersFlagsOverEnvAndConfig(t *testing.T) {
 	}
 }
 
+func TestResolveRequiresExplicitTokenForExplicitEndpoint(t *testing.T) {
+	cfg := config.New()
+	cfg.CurrentContext = "prod"
+	cfg.Fleets["prod"] = config.Fleet{
+		Host: "https://prod.example.com",
+		Users: map[string]config.User{"admin": {
+			BearerToken: "configured-token",
+			Password:    "configured-password",
+		}},
+	}
+	cfg.Contexts["prod"] = config.Context{Fleet: "prod", User: "admin"}
+
+	tests := []struct {
+		name string
+		in   ResolveInput
+	}{
+		{
+			name: "flag",
+			in: ResolveInput{
+				EndpointFlag: "https://other.example.com",
+				Env:          map[string]string{},
+				Config:       cfg,
+			},
+		},
+		{
+			name: "environment",
+			in: ResolveInput{
+				Env:    map[string]string{"KS_ENDPOINT": "https://other.example.com"},
+				Config: cfg,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Resolve(test.in)
+			const want = "explicit KubeSphere endpoint requires --token or KS_TOKEN"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Resolve() error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestResolveAcceptsExplicitEndpointWithEnvironmentToken(t *testing.T) {
+	got, err := Resolve(ResolveInput{
+		EndpointFlag: "https://flag.example.com",
+		Env:          map[string]string{"KS_TOKEN": "environment-token"},
+		Config:       config.New(),
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got.Endpoint != "https://flag.example.com" || got.ExplicitToken != "environment-token" {
+		t.Fatalf("Resolve() = %#v", got)
+	}
+}
+
+func TestResolveAcceptsEnvironmentTokenWithContextEndpoint(t *testing.T) {
+	cfg := config.New()
+	cfg.CurrentContext = "prod"
+	cfg.Fleets["prod"] = config.Fleet{
+		Host:  "https://prod.example.com",
+		Users: map[string]config.User{"admin": {}},
+	}
+	cfg.Contexts["prod"] = config.Context{Fleet: "prod", User: "admin"}
+
+	got, err := Resolve(ResolveInput{
+		Env:    map[string]string{"KS_TOKEN": "environment-token"},
+		Config: cfg,
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got.Endpoint != "https://prod.example.com" || got.ExplicitToken != "environment-token" {
+		t.Fatalf("Resolve() = %#v", got)
+	}
+}
+
 func TestResolveUsesActiveContext(t *testing.T) {
 	cfg := config.New()
 	cfg.Fleets["prod-fleet"] = config.Fleet{
@@ -102,25 +180,6 @@ func TestResolveScopesSameNamedUsersByFleet(t *testing.T) {
 		if got.Endpoint != test.endpoint || got.BearerToken != test.token || got.User != "admin" {
 			t.Fatalf("Resolve(%q) = %#v", test.context, got)
 		}
-	}
-}
-
-func TestResolveCombinesEndpointFlagWithContextUser(t *testing.T) {
-	cfg := config.New()
-	cfg.Fleets["prod"] = config.Fleet{Host: "https://config.example.com", Users: map[string]config.User{"admin": {}}}
-	cfg.Contexts["prod"] = config.Context{Fleet: "prod", User: "admin"}
-	cfg.CurrentContext = "prod"
-
-	got, err := Resolve(ResolveInput{
-		EndpointFlag:  "https://flag.example.com",
-		NoInteractive: true,
-		Config:        cfg,
-	})
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
-	}
-	if got.Endpoint != "https://flag.example.com" || got.Username != "admin" {
-		t.Fatalf("resolved = %#v", got)
 	}
 }
 

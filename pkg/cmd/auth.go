@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -135,6 +136,21 @@ func newLoginCommandWithPrompter(userAgent string, oauth *auth.OAuth, newPrompte
 				return err
 			}
 
+			configPath := config.DefaultPath()
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return err
+			}
+			fleet := cfg.Fleets[resolved.Fleet]
+			existingEndpoint := strings.TrimRight(strings.TrimSpace(fleet.Host), "/")
+			if existingEndpoint != "" && existingEndpoint != resolved.Endpoint {
+				return fmt.Errorf(
+					"error: fleet %q is already bound to endpoint %q; choose another fleet name",
+					resolved.Fleet,
+					fleet.Host,
+				)
+			}
+
 			response, err := oauth.Login(cmd.Context(), auth.TokenRequestOptions{
 				Endpoint:  resolved.Endpoint,
 				Username:  resolved.Username,
@@ -146,12 +162,7 @@ func newLoginCommandWithPrompter(userAgent string, oauth *auth.OAuth, newPrompte
 				return err
 			}
 
-			cfg, err := config.Load(config.DefaultPath())
-			if err != nil {
-				return err
-			}
 			cfg.CurrentContext = resolved.Context
-			fleet := cfg.Fleets[resolved.Fleet]
 			fleet.Host = resolved.Endpoint
 			if fleet.Users == nil {
 				fleet.Users = map[string]config.User{}
@@ -161,10 +172,14 @@ func newLoginCommandWithPrompter(userAgent string, oauth *auth.OAuth, newPrompte
 			fleet.Users[resolved.Username] = user
 			cfg.Fleets[resolved.Fleet] = fleet
 			cfg.Contexts[resolved.Context] = config.Context{Fleet: resolved.Fleet, User: resolved.Username}
-			if err := config.Save(config.DefaultPath(), cfg); err != nil {
-				return err
-			}
-			if err := tokencache.Save(tokencache.DefaultDir(), resolved.Fleet, resolved.Username, tokencache.NewEntry(response, time.Now())); err != nil {
+			if err := persistLoginState(
+				configPath,
+				tokencache.DefaultDir(),
+				cfg,
+				resolved.Fleet,
+				resolved.Username,
+				tokencache.NewEntry(response, time.Now()),
+			); err != nil {
 				return err
 			}
 
@@ -177,6 +192,21 @@ func newLoginCommandWithPrompter(userAgent string, oauth *auth.OAuth, newPrompte
 	cmd.Flags().StringVar(&fleetName, "fleet", "", "ksctl fleet name")
 	cmd.Flags().StringVar(&contextName, "context", "", "ksctl context name")
 	return cmd
+}
+
+func persistLoginState(configPath, cacheDir string, cfg *config.Config, fleet, user string, entry tokencache.Entry) error {
+	rollback, err := tokencache.SaveWithRollback(cacheDir, fleet, user, entry)
+	if err != nil {
+		return fmt.Errorf("save token cache: %w", err)
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		saveErr := fmt.Errorf("save config: %w", err)
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return errors.Join(saveErr, fmt.Errorf("restore token cache: %w", rollbackErr))
+		}
+		return saveErr
+	}
+	return nil
 }
 
 func newLogoutCommand(userAgent string, oauth *auth.OAuth) *cobra.Command {

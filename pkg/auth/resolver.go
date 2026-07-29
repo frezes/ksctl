@@ -8,13 +8,12 @@ import (
 )
 
 type ResolveInput struct {
-	EndpointFlag  string
-	TokenFlag     string
-	ContextFlag   string
-	ClusterFlag   string
-	NoInteractive bool
-	Env           map[string]string
-	Config        *config.Config
+	EndpointFlag string
+	TokenFlag    string
+	ContextFlag  string
+	ClusterFlag  string
+	Env          map[string]string
+	Config       *config.Config
 }
 
 type Resolved struct {
@@ -44,9 +43,15 @@ func Resolve(in ResolveInput) (Resolved, error) {
 		cfg = config.New()
 	}
 
+	explicitEndpoint := firstNonEmpty(in.EndpointFlag, env["KS_ENDPOINT"])
+	explicitToken := firstNonEmpty(in.TokenFlag, env["KS_TOKEN"])
+	if explicitEndpoint != "" && explicitToken == "" {
+		return Resolved{}, fmt.Errorf("error: explicit KubeSphere endpoint requires --token or KS_TOKEN")
+	}
+
 	out := Resolved{
-		Endpoint:      firstNonEmpty(in.EndpointFlag, env["KS_ENDPOINT"]),
-		ExplicitToken: firstNonEmpty(in.TokenFlag, env["KS_TOKEN"]),
+		Endpoint:      explicitEndpoint,
+		ExplicitToken: explicitToken,
 		Context:       firstNonEmpty(in.ContextFlag, cfg.CurrentContext),
 		Cluster:       in.ClusterFlag,
 	}

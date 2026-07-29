@@ -28,7 +28,6 @@ func TestRESTClientGetterBuildsKubeSphereConfig(t *testing.T) {
 		Namespace:             "demo",
 		RequestTimeout:        "15s",
 		InsecureSkipTLSVerify: true,
-		NoInteractive:         true,
 		UserAgent:             "ksctl/test",
 	}, Dependencies{})
 
@@ -84,8 +83,7 @@ func TestRESTClientGetterMapsConfigTLSClientConfig(t *testing.T) {
 
 	provider := auth.NewProvider(auth.ProviderOptions{CacheDir: filepath.Join(t.TempDir(), "tokens")})
 	getter := NewRESTClientGetter(&Options{
-		ConfigPath:    path,
-		NoInteractive: true,
+		ConfigPath: path,
 	}, Dependencies{TokenProvider: provider})
 
 	restConfig, err := getter.ToRESTConfig()
@@ -126,9 +124,8 @@ func TestRESTClientGetterReturnsResolvedKubeSphereCluster(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			getter := NewRESTClientGetter(&Options{
-				ConfigPath:    path,
-				Cluster:       test.clusterFlag,
-				NoInteractive: true,
+				ConfigPath: path,
+				Cluster:    test.clusterFlag,
 			}, Dependencies{})
 
 			got, err := getter.KubeSphereCluster()
@@ -164,10 +161,9 @@ func TestRESTClientGetterScopesClientConfigsToResolvedCluster(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			getter := NewRESTClientGetter(&Options{
-				ConfigPath:    configPath,
-				Token:         "secret",
-				Cluster:       test.clusterFlag,
-				NoInteractive: true,
+				ConfigPath: configPath,
+				Token:      "secret",
+				Cluster:    test.clusterFlag,
 			}, Dependencies{})
 			restConfig, err := getter.ToRESTConfig()
 			if err != nil {
@@ -191,10 +187,9 @@ func TestRESTClientGetterRejectsInvalidClusterPathSegment(t *testing.T) {
 	for _, cluster := range []string{"..", "team/member", "team%2Fmember"} {
 		t.Run(cluster, func(t *testing.T) {
 			getter := NewRESTClientGetter(&Options{
-				Endpoint:      "https://ks.example.com/proxy",
-				Token:         "secret",
-				Cluster:       cluster,
-				NoInteractive: true,
+				Endpoint: "https://ks.example.com/proxy",
+				Token:    "secret",
+				Cluster:  cluster,
 			}, Dependencies{})
 
 			_, err := getter.ToRESTConfig()
@@ -215,6 +210,7 @@ func TestRESTClientGetterRejectsInvalidClusterBeforeResolvingToken(t *testing.T)
 			name: "explicit cluster",
 			options: Options{
 				Endpoint: "https://ks.example.com",
+				Token:    "secret",
 				Cluster:  "team/member",
 			},
 		},
@@ -280,9 +276,8 @@ func TestRESTClientGetterCachesDiscoveryAndPreservesAPIPaths(t *testing.T) {
 	defer server.Close()
 
 	getter := NewRESTClientGetter(&Options{
-		Endpoint:      server.URL,
-		Token:         "secret",
-		NoInteractive: true,
+		Endpoint: server.URL,
+		Token:    "secret",
 	}, Dependencies{})
 
 	first, err := getter.ToDiscoveryClient()
@@ -344,9 +339,8 @@ func TestRESTMapperFallsBackToCoreV1Discovery(t *testing.T) {
 	defer server.Close()
 
 	getter := NewRESTClientGetter(&Options{
-		Endpoint:      server.URL,
-		Token:         "secret",
-		NoInteractive: true,
+		Endpoint: server.URL,
+		Token:    "secret",
 	}, Dependencies{})
 
 	cachedClient, err := getter.ToDiscoveryClient()
@@ -385,7 +379,6 @@ func TestRESTClientGetterUsesInjectedTransportAsTLSOwner(t *testing.T) {
 		Endpoint:              "https://ks.example.com",
 		Token:                 "secret",
 		InsecureSkipTLSVerify: true,
-		NoInteractive:         true,
 	}, Dependencies{Transport: transport})
 
 	restConfig, err := getter.ToRESTConfig()

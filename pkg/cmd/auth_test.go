@@ -182,18 +182,6 @@ func TestLoginWritesConfigAndTokenCache(t *testing.T) {
 	t.Setenv("HOME", home)
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("KSCTL_CONFIG", configPath)
-	cfg := config.New()
-	cfg.Fleets["prod"] = config.Fleet{
-		Host:            "https://old.example.com",
-		TLSClientConfig: config.TLSClientConfig{ServerName: "ks.example.com"},
-		Users: map[string]config.User{
-			"admin":    {Username: "configured-admin", BearerToken: "manual-token", BearerTokenFile: "/tmp/manual-token", Password: "manual-password"},
-			"readonly": {Username: "viewer", BearerToken: "readonly-token"},
-		},
-	}
-	if err := config.Save(configPath, cfg); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/token" {
@@ -217,6 +205,19 @@ func TestLoginWritesConfigAndTokenCache(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"issued-token","refresh_token":"refresh-token","token_type":"bearer","expires_in":7200}`))
 	}))
 	defer server.Close()
+
+	cfg := config.New()
+	cfg.Fleets["prod"] = config.Fleet{
+		Host:            server.URL + "/",
+		TLSClientConfig: config.TLSClientConfig{ServerName: "ks.example.com"},
+		Users: map[string]config.User{
+			"admin":    {Username: "configured-admin", BearerToken: "manual-token", BearerTokenFile: "/tmp/manual-token", Password: "manual-password"},
+			"readonly": {Username: "viewer", BearerToken: "readonly-token"},
+		},
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
 
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{In: strings.NewReader(""), Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
@@ -257,6 +258,114 @@ func TestLoginWritesConfigAndTokenCache(t *testing.T) {
 	if entry.AccessToken != "issued-token" || entry.RefreshToken != "refresh-token" || entry.ExpiresIn != 7200 {
 		t.Fatalf("token entry = %#v", entry)
 	}
+}
+
+func TestLoginRejectsFleetBoundToAnotherEndpointBeforeOAuth(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+	cfg := config.New()
+	cfg.Fleets["prod"] = config.Fleet{Host: "https://existing.example.com/"}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"must-not-be-used","expires_in":7200}`))
+	}))
+	defer server.Close()
+
+	prompter := &commandPrompter{}
+	cmd := newLoginTestRoot(prompter)
+	cmd.SetArgs([]string{"auth", "login", server.URL, "--username", "admin", "--password", "temporary-password", "--fleet", "prod"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `fleet "prod" is already bound`) {
+		t.Fatalf("Execute() error = %v, want fleet binding rejection", err)
+	}
+	if requests != 0 {
+		t.Fatalf("OAuth requests = %d, want 0", requests)
+	}
+}
+
+func TestPersistLoginStateCacheFailureLeavesConfigUnchanged(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.New()
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	before := []byte(readFile(t, configPath))
+
+	cacheDir := filepath.Join(t.TempDir(), "cache-blocker")
+	if err := os.WriteFile(cacheDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cfg.CurrentContext = "prod"
+	err := persistLoginState(configPath, cacheDir, cfg, "prod", "admin", loginTestTokenEntry())
+	if err == nil || !strings.Contains(err.Error(), "save token cache") {
+		t.Fatalf("persistLoginState() error = %v", err)
+	}
+	after, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("config changed after cache failure:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestPersistLoginStateConfigFailureRestoresExactCacheBytes(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "tokens")
+	cachePath := tokencache.Path(cacheDir, "prod", "admin")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	previous := []byte("{malformed token cache\n")
+	if err := os.WriteFile(cachePath, previous, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	configBlocker := filepath.Join(t.TempDir(), "config-blocker")
+	if err := os.WriteFile(configBlocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	err := persistLoginState(filepath.Join(configBlocker, "config.yaml"), cacheDir, config.New(), "prod", "admin", loginTestTokenEntry())
+	if err == nil {
+		t.Fatal("persistLoginState() error = nil, want config save failure")
+	}
+	got, readErr := os.ReadFile(cachePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if !bytes.Equal(got, previous) {
+		t.Fatalf("restored cache = %q, want %q", got, previous)
+	}
+}
+
+func TestPersistLoginStateConfigFailureDeletesNewCacheEntry(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "tokens")
+	configBlocker := filepath.Join(t.TempDir(), "config-blocker")
+	if err := os.WriteFile(configBlocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	err := persistLoginState(filepath.Join(configBlocker, "config.yaml"), cacheDir, config.New(), "prod", "admin", loginTestTokenEntry())
+	if err == nil {
+		t.Fatal("persistLoginState() error = nil, want config save failure")
+	}
+	if _, statErr := os.Stat(tokencache.Path(cacheDir, "prod", "admin")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("Stat() error = %v, want cache entry removed", statErr)
+	}
+}
+
+func loginTestTokenEntry() tokencache.Entry {
+	return tokencache.NewEntry(tokencache.Response{
+		AccessToken: "issued-token",
+		ExpiresIn:   7200,
+	}, time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC))
 }
 
 func TestLoginDerivesFleetAndContextWithoutUsingExistingContext(t *testing.T) {

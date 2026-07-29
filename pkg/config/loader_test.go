@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,32 +110,100 @@ func TestMarshalOmitsEmptyTLSClientConfig(t *testing.T) {
 	}
 }
 
-func TestLoadDoesNotMapLegacyClustersToFleets(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("clusters:\n  old:\n    host: https://old.example.com\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+func TestLoadRejectsUnsupportedOrAmbiguousDocuments(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{
+			name: "legacy clusters",
+			data: "clusters:\n  old:\n    host: https://old.example.com\n",
+		},
+		{
+			name: "legacy root users",
+			data: "fleets:\n  prod:\n    host: https://prod.example.com\nusers:\n  admin:\n    bearerToken: old-token\n",
+		},
+		{
+			name: "unknown field",
+			data: "fleets:\n  prod:\n    host: https://prod.example.com\n    unexpected: true\n",
+		},
+		{
+			name: "duplicate field",
+			data: "currentContext: prod\ncurrentContext: staging\n",
+		},
+		{
+			name: "unsupported api version",
+			data: "apiVersion: ksctl.kubesphere.io/v2\nkind: Config\n",
+		},
+		{
+			name: "unsupported kind",
+			data: "apiVersion: ksctl.kubesphere.io/v1alpha1\nkind: LegacyConfig\n",
+		},
 	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if len(cfg.Fleets) != 0 {
-		t.Fatalf("legacy clusters were mapped to fleets: %#v", cfg.Fleets)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(test.data), 0o600); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatal("Load() error = nil, want document rejection")
+			}
+		})
 	}
 }
 
-func TestLoadDoesNotMapRootUsersToFleets(t *testing.T) {
+func TestLoadDefaultsMissingTypeMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	data := []byte("fleets:\n  prod:\n    host: https://prod.example.com\nusers:\n  admin:\n    bearerToken: old-token\n")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("currentContext: prod\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
+
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if got := cfg.Fleets["prod"].Users; len(got) != 0 {
-		t.Fatalf("root users were mapped into fleet: %#v", got)
+	if cfg.APIVersion != ConfigAPIVersion || cfg.Kind != ConfigKind {
+		t.Fatalf("type metadata = %q, %q", cfg.APIVersion, cfg.Kind)
+	}
+	if cfg.Fleets == nil || cfg.Contexts == nil {
+		t.Fatalf("maps were not initialized: %#v", cfg)
+	}
+}
+
+func TestSaveRejectsUnsupportedTypeMetadataWithoutCreatingFile(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*Config)
+	}{
+		{
+			name: "unsupported api version",
+			configure: func(cfg *Config) {
+				cfg.APIVersion = "ksctl.kubesphere.io/v2"
+			},
+		},
+		{
+			name: "unsupported kind",
+			configure: func(cfg *Config) {
+				cfg.Kind = "LegacyConfig"
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			cfg := New()
+			test.configure(cfg)
+
+			if err := Save(path, cfg); err == nil {
+				t.Fatal("Save() error = nil, want type metadata rejection")
+			}
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Stat() error = %v, want file not created", err)
+			}
+		})
 	}
 }
 

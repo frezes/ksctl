@@ -1,6 +1,8 @@
 package token
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,5 +168,61 @@ func TestSaveReplacesBroadCachePermissions(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestSaveWithRollbackRestoresExactExistingBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := Path(dir, "prod", "admin")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	previous := []byte("{malformed token cache\n")
+	if err := os.WriteFile(path, previous, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	rollback, err := SaveWithRollback(dir, "prod", "admin", NewEntry(Response{
+		AccessToken: "replacement",
+		ExpiresIn:   60,
+	}, time.Now()))
+	if err != nil {
+		t.Fatalf("SaveWithRollback() error = %v", err)
+	}
+	if err := rollback(); err != nil {
+		t.Fatalf("rollback() error = %v", err)
+	}
+	if err := rollback(); err != nil {
+		t.Fatalf("second rollback() error = %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !bytes.Equal(got, previous) {
+		t.Fatalf("restored bytes = %q, want %q", got, previous)
+	}
+}
+
+func TestSaveWithRollbackRemovesNewEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := Path(dir, "prod", "admin")
+
+	rollback, err := SaveWithRollback(dir, "prod", "admin", NewEntry(Response{
+		AccessToken: "new-token",
+		ExpiresIn:   60,
+	}, time.Now()))
+	if err != nil {
+		t.Fatalf("SaveWithRollback() error = %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("Stat() after save error = %v", err)
+	}
+	if err := rollback(); err != nil {
+		t.Fatalf("rollback() error = %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Stat() error = %v, want entry removed", err)
 	}
 }
