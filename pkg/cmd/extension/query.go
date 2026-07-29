@@ -88,7 +88,7 @@ func newShowCommand(
 		Example: parent + " extension show NAME [--version VERSION]",
 		Args:    exactExtensionNameArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			format, err := parseOutput(output, false)
+			format, err := parseOutput(output, true)
 			if err != nil {
 				return err
 			}
@@ -107,7 +107,7 @@ func newShowCommand(
 			if format == outputJSON || format == outputYAML {
 				err = writeStructured(streams.Out, result, format)
 			} else {
-				err = printShow(streams.Out, result)
+				err = printShow(streams.Out, result, format)
 			}
 			if err != nil {
 				return fmt.Errorf("write extension show output: %w", err)
@@ -126,7 +126,7 @@ func newShowCommand(
 		"output",
 		"o",
 		string(outputTable),
-		"Output format: table, json, or yaml",
+		"Output format: table, wide, json, or yaml",
 	)
 	return command
 }

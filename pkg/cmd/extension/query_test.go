@@ -81,7 +81,7 @@ func TestListPassesFlagsAndPrintsTable(t *testing.T) {
 		t.Fatalf("options = %#v, want %#v", gotOptions, want)
 	}
 	if got, want := out.String(),
-		"NAME  CATEGORY  RECOMMENDED  INSTALLED  TARGET  STATE\n"; got != want {
+		"NAME  CATEGORY  RECOMMENDED  INSTALLED  STATE\n"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
@@ -110,7 +110,7 @@ func TestShowPassesOpaqueExactVersion(t *testing.T) {
 	}
 	err := executeExtensionCommand(
 		t,
-		[]string{"extension", "show", "demo", "--version", "v1.0.0+build"},
+		[]string{"extension", "show", "demo", "--version", "v1.0.0+build", "-o", "wide"},
 		streams,
 		func() (Service, error) { return service, nil },
 	)
