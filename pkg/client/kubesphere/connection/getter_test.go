@@ -120,7 +120,7 @@ func TestRESTClientGetterReturnsUsernameReferenceErrors(t *testing.T) {
 	}
 }
 
-func TestRESTClientGetterRejectsInvalidClusterBeforeResolvingToken(t *testing.T) {
+func TestRESTClientGetterValidatesClusterOnlyWhenRequested(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		options   clientoptions.Options
@@ -157,12 +157,20 @@ func TestRESTClientGetterRejectsInvalidClusterBeforeResolvingToken(t *testing.T)
 
 			provider := &recordingTokenProvider{}
 			getter := NewRESTClientGetter(&test.options, Dependencies{TokenProvider: provider})
-			_, err := getter.ToRESTConfig()
+			_, err := getter.KubeSphereCluster()
 			if err == nil || !strings.Contains(err.Error(), "invalid cluster") {
-				t.Fatalf("ToRESTConfig() error = %v, want invalid cluster", err)
+				t.Fatalf("KubeSphereCluster() error = %v, want invalid cluster", err)
 			}
 			if provider.calls != 0 {
-				t.Fatalf("Token() calls = %d, want 0", provider.calls)
+				t.Fatalf("Token() calls after KubeSphereCluster() = %d, want 0", provider.calls)
+			}
+
+			_, err = getter.ToRESTConfig()
+			if err != nil {
+				t.Fatalf("ToRESTConfig() error = %v, want Fleet config", err)
+			}
+			if provider.calls != 1 {
+				t.Fatalf("Token() calls after ToRESTConfig() = %d, want 1", provider.calls)
 			}
 		})
 	}

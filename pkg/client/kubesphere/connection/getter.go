@@ -26,10 +26,13 @@ type RESTClientGetter struct {
 	transport            http.RoundTripper
 	ignoreDefaultCluster bool
 
-	configOnce      sync.Once
-	restConfig      *kubesphererest.Config
-	resolvedCluster string
-	configErr       error
+	resolveOnce sync.Once
+	resolved    auth.Resolved
+	resolveErr  error
+
+	configOnce sync.Once
+	restConfig *kubesphererest.Config
+	configErr  error
 
 	identityOnce sync.Once
 	username     string
@@ -61,8 +64,16 @@ func (g *RESTClientGetter) ToRESTConfig() (*kubesphererest.Config, error) {
 }
 
 func (g *RESTClientGetter) KubeSphereCluster() (string, error) {
-	g.loadConfig()
-	return g.resolvedCluster, g.configErr
+	g.loadResolved()
+	if g.resolveErr != nil {
+		return "", g.resolveErr
+	}
+	if g.resolved.Cluster != "" {
+		if messages := kubesphererest.IsValidPathSegmentName(g.resolved.Cluster); len(messages) != 0 {
+			return "", fmt.Errorf("invalid cluster %q: %v", g.resolved.Cluster, messages)
+		}
+	}
+	return g.resolved.Cluster, nil
 }
 
 func (g *RESTClientGetter) KubeSphereUsername() (string, error) {
@@ -103,11 +114,11 @@ func (g *RESTClientGetter) KubeSphereUsername() (string, error) {
 	return g.username, g.identityErr
 }
 
-func (g *RESTClientGetter) loadConfig() {
-	g.configOnce.Do(func() {
+func (g *RESTClientGetter) loadResolved() {
+	g.resolveOnce.Do(func() {
 		cfg, err := config.Load(g.configPath())
 		if err != nil {
-			g.configErr = err
+			g.resolveErr = err
 			return
 		}
 		resolved, err := auth.Resolve(auth.ResolveInput{
@@ -118,30 +129,33 @@ func (g *RESTClientGetter) loadConfig() {
 			Config:       cfg,
 		})
 		if err != nil {
-			g.configErr = err
+			g.resolveErr = err
 			return
 		}
 		if g.ignoreDefaultCluster && g.options.Cluster == "" {
 			resolved.Cluster = ""
 		}
-		g.resolvedCluster = resolved.Cluster
-		if resolved.Cluster != "" {
-			if messages := kubesphererest.IsValidPathSegmentName(resolved.Cluster); len(messages) != 0 {
-				g.configErr = fmt.Errorf("invalid cluster %q: %v", resolved.Cluster, messages)
-				return
-			}
-		}
+		g.resolved = resolved
+	})
+}
 
+func (g *RESTClientGetter) loadConfig() {
+	g.configOnce.Do(func() {
+		g.loadResolved()
+		if g.resolveErr != nil {
+			g.configErr = g.resolveErr
+			return
+		}
 		timeout, err := parseKubeSphereTimeout(g.options.RequestTimeout)
 		if err != nil {
 			g.configErr = err
 			return
 		}
-		resolvedToken, err := g.tokenProvider.Token(context.Background(), resolved, auth.TokenOptions{
+		resolvedToken, err := g.tokenProvider.Token(context.Background(), g.resolved, auth.TokenOptions{
 			UserAgent:             g.options.UserAgent,
 			Timeout:               timeout,
 			InsecureSkipTLSVerify: g.options.InsecureSkipTLSVerify,
-			TLSClientConfig:       resolved.TLSClientConfig,
+			TLSClientConfig:       g.resolved.TLSClientConfig,
 		})
 		if err != nil {
 			g.configErr = err
@@ -149,7 +163,7 @@ func (g *RESTClientGetter) loadConfig() {
 		}
 
 		g.restConfig = &kubesphererest.Config{
-			Host:        resolved.Endpoint,
+			Host:        g.resolved.Endpoint,
 			BearerToken: resolvedToken,
 			UserAgent:   g.options.UserAgent,
 			Timeout:     timeout,
@@ -157,7 +171,7 @@ func (g *RESTClientGetter) loadConfig() {
 		if g.transport != nil {
 			g.restConfig.Transport = g.transport
 		} else {
-			g.restConfig.TLSClientConfig = internalrest.TLSClientConfig(resolved.TLSClientConfig, g.options.InsecureSkipTLSVerify)
+			g.restConfig.TLSClientConfig = internalrest.TLSClientConfig(g.resolved.TLSClientConfig, g.options.InsecureSkipTLSVerify)
 		}
 	})
 }
