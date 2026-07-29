@@ -15,7 +15,9 @@
 - Keep `k8s.io/apimachinery`, `k8s.io/cli-runtime`, `k8s.io/client-go`, and `k8s.io/kubectl` aligned at v0.36.2.
 - Do not add a KubeSphere logging, monitoring, Prometheus, or historical-query API.
 - Do not add cross-Cluster log streaming or metrics aggregation.
-- Do not add a public client interface, persistent configuration field, or dependency module.
+- Do not add a public client interface or persistent configuration field.
+- The only dependency-graph addition is the user-approved, kubectl-aligned
+  indirect requirement `k8s.io/metrics v0.36.2`.
 - Keep the built-in commands read-only and identical through `ksctl` and `kubectl ks`.
 - Do not modify `staging/`.
 - Preserve kubectl's command syntax, flags, validation, output, and errors.
