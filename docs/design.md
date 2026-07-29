@@ -8,9 +8,9 @@ are not the current architecture reference.
 ## Goals
 
 - Provide one CLI for inspecting KubeSphere 4.x resources and Kubernetes
-  resources exposed through KubeSphere.
-- Preserve familiar kubectl `get` and `describe` syntax, discovery, selection,
-  printing, watching, describing, and error behavior.
+  resources, logs, and current metrics exposed through KubeSphere.
+- Preserve familiar kubectl `get`, `describe`, `logs`, and `top` syntax,
+  discovery, selection, printing, streaming, and error behavior.
 - Keep the generic built-in resource surface read-only, with one explicit,
   controlled extension-lifecycle exception.
 - Support interactive use and explicit, predictable automation.
@@ -29,6 +29,8 @@ are not the current architecture reference.
   watchers, or Describers
 - Reading, merging, or writing `~/.kube/config`
 - A static public registry of the resources a KubeSphere server may expose
+- KubeSphere logging or monitoring extension APIs, historical observability
+  queries, or cross-Cluster logs/metrics aggregation
 - Auditing or sandboxing executable plugins
 - KubeSphere 3.x compatibility
 
@@ -52,7 +54,7 @@ show `kubectl ks`; command behavior and options otherwise remain shared.
 The root owns KubeSphere connection flags and constructs these command groups:
 
 - ksctl-owned `auth`, `config`, `extension`, `plugin`, and `version` commands;
-- kubectl-owned `get` and `describe` commands; and
+- kubectl-owned `get`, `describe`, `logs`, and `top` commands; and
 - Cobra-provided help, completion, and shell-completion commands.
 
 Commands use injected input, output, and error streams. The executable
@@ -66,28 +68,35 @@ plugin dispatcher an opportunity to resolve it to a `ksctl-*` executable.
 
 ## Resource command pipeline
 
-ksctl constructs kubectl v0.36.2's commands directly:
+ksctl constructs kubectl v0.36.2's commands in
+`pkg/cmd/resource_commands.go`:
 
 ```text
 Cobra command
-  -> kubectl get or describe
+  -> kubectl get, describe, logs, or top command/options
   -> kubectl Factory
   -> ksctl Kubernetes RESTClientGetter
-  -> discovery and RESTMapper
-  -> Kubernetes REST client
+  -> discovery and RESTMapper where required
+  -> Kubernetes REST, Core, or Metrics client
   -> KubeSphere Endpoint
 ```
 
-`get.NewCmdGet` and `describe.NewCmdDescribe` receive the root display name, a
-shared `cmdutil.Factory`, and the process streams. ksctl changes their examples
-to use the active entrypoint but does not wrap their execution pipeline or
-post-process successful output.
+`get`, `describe`, and `logs` use their upstream constructors directly. `top`
+uses upstream parent, subcommand, option, validation, client, and printer
+types, with one private assembly adapter: after upstream `Complete`, ksctl
+replaces top's raw Clientset DiscoveryClient with
+`Factory.ToDiscoveryClient`. This preserves ksctl's KubeSphere discovery
+fallback without forking top behavior.
+
+A recursive example normalizer changes upstream `kubectl` examples to the
+active `ksctl` or `kubectl ks` display name.
 
 This delegates resource arguments, selectors, filename inputs, pagination,
 watching, table negotiation, printers, built-in Describers, generic describe
-fallback, Events, and most error behavior to the pinned kubectl implementation.
-It also means command-specific capabilities evolve only when the aligned
-Kubernetes dependencies are intentionally upgraded.
+fallback, Events, workload-to-Pod log resolution, log streaming, Metrics
+clients, resource calculations, and most error behavior to the pinned kubectl
+implementation. It also means command-specific capabilities evolve only when
+the aligned Kubernetes dependencies are intentionally upgraded.
 
 The Factory consumes `pkg/client/kubernetes.RESTClientGetter`, which implements
 the four cli-runtime client interfaces:
@@ -122,6 +131,13 @@ actually respond. When a Cluster-scoped core-v1 discovery request fails, the
 client may query the unscoped KubeSphere Endpoint for that discovery data while
 resource requests remain Cluster-scoped. This is a compatibility path, not a
 hard-coded list of user-visible KubeSphere resources.
+
+The private top adapter uses this same cached discovery surface. This matters
+because kubectl v0.36.2 otherwise takes top discovery from a newly created
+Clientset and bypasses `RESTClientGetter.ToDiscoveryClient`. Metrics API
+discovery can therefore be recovered from APIService registration and the
+concrete `metrics.k8s.io/v1beta1` endpoint when aggregate discovery roots are
+unusable.
 
 ## Client boundaries
 
@@ -342,6 +358,18 @@ the client layer selects the effective route, and the server remains
 responsible for authenticating the KubeSphere Token and serving or proxying the
 target API.
 
+Pod log subresource, Metrics API, and supporting Core API requests use the same
+effective server. For example:
+
+```text
+/clusters/<cluster>/api/v1/namespaces/<namespace>/pods/<pod>/log
+/clusters/<cluster>/apis/metrics.k8s.io/v1beta1/namespaces/<namespace>/pods
+/clusters/<cluster>/apis/metrics.k8s.io/v1beta1/nodes
+```
+
+The commands query one selected Cluster. They do not aggregate across Fleet
+members.
+
 ## Generated kubeconfig
 
 `config generate kubeconfig` is a KubeSphere-native request to:
@@ -376,6 +404,8 @@ unknown command path. The dispatcher:
 Because lookup begins only after Cobra fails to find a built-in command,
 plugins cannot replace or extend built-in command paths. Flags before a plugin
 name are rejected so persistent flags cannot be mistaken for plugin input.
+The built-in `logs` and `top` paths likewise cannot be replaced by
+`ksctl-logs` or `ksctl-top` executables.
 
 `plugin list` scans unique PATH directories in order and diagnoses candidates
 for executable permissions, PATH shadowing, and conflicts with the built-in
@@ -400,6 +430,8 @@ and their own flag and connection handling.
 - OAuth errors are constructed without embedding request credentials.
 - Generated kubeconfig and raw config output can contain credentials and must
   be protected by the caller.
+- Container logs are written to stdout and may contain application secrets;
+  ksctl does not inspect or redact their content.
 - Plugins are not inspected or sandboxed. Trust in a plugin is equivalent to
   trust in any other executable run by the user.
 
@@ -411,8 +443,9 @@ or a sandbox.
 
 - Go 1.26 or later is required by the module.
 - KubeSphere 4.x is the supported server generation.
-- `k8s.io/apimachinery`, `k8s.io/cli-runtime`, `k8s.io/client-go`, and
-  `k8s.io/kubectl` are aligned at v0.36.2.
+- `k8s.io/apimachinery`, `k8s.io/cli-runtime`, `k8s.io/client-go`,
+  `k8s.io/kubectl`, and the indirect `k8s.io/metrics` dependency are aligned at
+  v0.36.2.
 - The standalone and kubectl-plugin binaries are built from the same module and
   command packages.
 
@@ -425,7 +458,9 @@ interfaces evolve together.
 The architecture is protected at several levels:
 
 - command tests verify both display names, registered commands and flags,
-  version behavior, resource requests, and member-Cluster routing;
+  version behavior, resource requests, member-Cluster routing, recursive
+  logs/top examples, log subresource streaming, Metrics/Core requests, and
+  Metrics API discovery fallback;
 - config tests verify defaults, serialization, redaction, migration boundaries,
   and filesystem permissions;
 - authentication and cache tests verify precedence, login and refresh behavior,

@@ -8,7 +8,8 @@ the Kubernetes resources exposed through KubeSphere. Use it as the standalone
 ## Features
 
 - Inspect KubeSphere and Kubernetes resources with kubectl-compatible `get`
-  and `describe` commands.
+  and `describe`, stream container logs with `logs`, and view Metrics Server
+  CPU/memory usage with `top`.
 - Log in interactively or supply credentials for scripts and automation.
 - Select KubeSphere Contexts, member Clusters, Namespaces, and Projects.
 - Generate kubeconfig for the selected KubeSphere user and Cluster.
@@ -55,6 +56,8 @@ Log in, then inspect KubeSphere and Kubernetes resources:
 ksctl auth login
 ksctl get workspaces
 ksctl get pods -A
+ksctl logs deployment/web -n demo --all-pods
+ksctl top pod -n demo
 ```
 
 Interactive login prompts for missing connection and account values, reads the

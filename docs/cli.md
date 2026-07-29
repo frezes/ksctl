@@ -4,8 +4,9 @@
 
 `ksctl` is a command-line client for inspecting KubeSphere 4.x resources and
 the Kubernetes resources exposed through KubeSphere. Its generic built-in
-resource commands are read-only: `get` displays resources and `describe`
-displays their detailed state. The purpose-built `extension` group is the
+resource commands are read-only: `get` displays resources, `describe` displays
+their detailed state, `logs` reads container logs, and `top` displays current
+Metrics Server CPU/memory usage. The purpose-built `extension` group is the
 controlled exception for KubeSphere extension lifecycle management.
 
 The release provides two equivalent entrypoints backed by the same command
@@ -23,23 +24,23 @@ using the kubectl plugin.
 
 - A reachable KubeSphere 4.x API endpoint
 - A KubeSphere account or bearer token
+- Metrics Server with `metrics.k8s.io/v1beta1` for `top` commands
 - The `ksctl` executable, or the `kubectl-ks` executable on `PATH` for use as
   `kubectl ks`
 
 ## Command syntax
 
-Resource commands use this general syntax:
-
 ```text
-ksctl COMMAND TYPE [NAME] [flags]
+ksctl get TYPE [NAME] [flags]
+ksctl describe TYPE [NAME_PREFIX] [flags]
+ksctl logs (POD | TYPE/NAME) [flags]
+ksctl top (pod | node) [NAME] [flags]
 ```
 
-- `COMMAND` is `get` or `describe`.
-- `TYPE` is a resource type advertised by server discovery. Singular, plural,
-  short, versioned, and group-qualified names are accepted when advertised.
-- `NAME` selects one resource. Omit it to select a list, or use the forms shown
-  by the command-specific help.
-- Flags select a connection and scope, filter resources, or change output.
+Resource names are resolved from server discovery. Singular, plural, short,
+versioned, and group-qualified names are accepted where the selected kubectl
+command supports them. Use command-specific help for exact arguments and
+flags.
 
 Use built-in help to inspect the live command surface:
 
@@ -55,6 +56,8 @@ ksctl config generate kubeconfig --help
 | --- | --- |
 | `ksctl get TYPE [NAME]` | Display one or more resources. |
 | `ksctl describe TYPE [NAME_PREFIX]` | Display resource details and related information. |
+| `ksctl logs (POD \| TYPE/NAME)` | Print or follow logs from one or more Pod containers. |
+| `ksctl top (pod \| node) [NAME]` | Display current Metrics Server CPU/memory usage. |
 | `ksctl auth login [ENDPOINT]` | Authenticate with a username and password, then save a Context and token cache. |
 | `ksctl auth whoami` | Verify the selected credential and display the server-side User and global role. |
 | `ksctl auth logout [CONTEXT]` | Delete cached login credentials for the current or named Context. |
@@ -430,6 +433,44 @@ ksctl describe pod/web-0 -n demo --cluster member-1
 `ksctl describe --help`. It does not support structured `-o` output; use `get`
 for that.
 
+### Read container logs
+
+`logs` uses kubectl v0.36.2's Pod Logs behavior. It can read a Pod directly or
+resolve a workload to its Pods:
+
+```bash
+ksctl logs pod/web-0 -n demo
+ksctl logs deployment/web -n demo --all-pods
+ksctl logs deployment/web -n demo --all-pods --all-containers --prefix
+ksctl logs pod/web-0 -n demo -c app --previous
+ksctl logs pod/web-0 -n demo --tail=100 --since=1h
+ksctl logs pod/web-0 -n demo --follow
+```
+
+Logs are read from the selected Kubernetes Cluster through the KubeSphere
+Endpoint. The built-in command does not search a logging extension, retain
+history, reconnect a failed stream, or combine results from multiple Clusters.
+Application logs can contain credentials or other sensitive data; protect
+terminal capture and redirected files accordingly.
+
+### View current resource usage
+
+`top` reads the Kubernetes Metrics API. Metrics Server must expose
+`metrics.k8s.io/v1beta1` in the selected Cluster:
+
+```bash
+ksctl top pod -n demo
+ksctl top pod -A --sort-by=cpu
+ksctl top pod web-0 -n demo --containers
+ksctl top node
+ksctl top node worker-0 --show-capacity
+```
+
+`top pod` is namespaced and supports `-A`; `top node` is Cluster-scoped. The
+reported values are the recent signals used by Kubernetes autoscaling, not
+historical monitoring data. ksctl does not fall back to a KubeSphere
+monitoring extension.
+
 ### Select scope
 
 ```bash
@@ -437,6 +478,9 @@ ksctl get pods -n demo
 ksctl get pods -A
 ksctl get pods -A --cluster member-1
 ksctl describe deployment web -n demo --cluster member-1
+ksctl logs deployment/web -n demo --all-pods --cluster member-1
+ksctl top pod -n demo --cluster member-1
+ksctl top node --cluster member-1
 ```
 
 ### Filter, sort, and watch
@@ -450,8 +494,8 @@ ksctl get pods --sort-by=.metadata.name
 ksctl get pods --watch
 ```
 
-Run `ksctl get --help` and `ksctl describe --help` for their complete command
-flags.
+Run `ksctl get --help`, `ksctl describe --help`, `ksctl logs --help`, and
+`ksctl top --help` for the complete command-specific flags.
 
 ### Select output
 
@@ -597,6 +641,18 @@ ksctl get workspaces
   Namespace or Project.
 - A login-required error means no usable explicit, configured, or cached
   credential was found for the selected connection.
+
+### `Metrics API not available`
+
+`top` requires Metrics Server and a discoverable `metrics.k8s.io/v1beta1`
+APIService in the selected Cluster. Verify the Metrics Server deployment,
+APIService availability, and the selected `--cluster`.
+
+### Logs stop during `--follow`
+
+A followed log stream ends when the server closes it, the user cancels it, an
+unignored request error occurs, or an explicit nonzero `--request-timeout`
+expires. ksctl does not reconnect or resume the stream.
 
 Avoid `ksctl config view --raw` during routine troubleshooting because its
 output can contain credentials and TLS private key data.
