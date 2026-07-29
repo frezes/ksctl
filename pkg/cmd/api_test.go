@@ -68,6 +68,7 @@ func TestAPICommandRequestVariants(t *testing.T) {
 		wantQuery       string
 		wantContentType string
 		wantBody        string
+		status          int
 	}{
 		{
 			name:       "default get preserves query",
@@ -119,6 +120,20 @@ func TestAPICommandRequestVariants(t *testing.T) {
 			wantMethod: "PROPFIND",
 			wantPath:   "/kapis/example.io/v1/items",
 		},
+		{
+			name:       "multi status is successful",
+			args:       []string{"/kapis/example.io/v1/items", "-X", "propfind"},
+			wantMethod: "PROPFIND",
+			wantPath:   "/kapis/example.io/v1/items",
+			status:     http.StatusMultiStatus,
+		},
+		{
+			name:       "upper 2xx status is successful",
+			args:       []string{"/kapis/example.io/v1/items"},
+			wantMethod: http.MethodGet,
+			wantPath:   "/kapis/example.io/v1/items",
+			status:     299,
+		},
 	}
 
 	response := []byte{0x00, 'o', 'k', '\n'}
@@ -133,6 +148,9 @@ func TestAPICommandRequestVariants(t *testing.T) {
 					query:       request.URL.RawQuery,
 					contentType: request.Header.Get("Content-Type"),
 					body:        string(body),
+				}
+				if test.status != 0 {
+					w.WriteHeader(test.status)
 				}
 				_, _ = w.Write(response)
 			}))
@@ -259,6 +277,32 @@ func TestAPICommandJoinsHTTPAndOutputErrors(t *testing.T) {
 		!strings.Contains(err.Error(), "request KubeSphere API") ||
 		!strings.Contains(err.Error(), "write API response") {
 		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func TestAPICommandReturnsSuccessOutputWriteError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("success"))
+	}))
+	t.Cleanup(server.Close)
+
+	command := newAPICommand(
+		apiRESTConfigGetterFunc(func() (*kubesphererest.Config, error) {
+			return &kubesphererest.Config{Host: server.URL}, nil
+		}),
+		clientkubesphere.NewRESTClientFactory(nil),
+	)
+	command.SilenceUsage = true
+	command.SetOut(apiErrorWriter{err: errors.New("writer failed")})
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"/kapis/example"})
+
+	err := command.Execute()
+	if err == nil || !strings.Contains(err.Error(), "write API response") {
+		t.Fatalf("Execute() error = %v, want output error", err)
+	}
+	if strings.Contains(err.Error(), "request KubeSphere API") {
+		t.Fatalf("Execute() error = %v, want only output error", err)
 	}
 }
 

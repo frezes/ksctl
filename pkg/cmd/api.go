@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kubesphererest "kubesphere.io/client-go/rest"
 )
 
@@ -90,6 +91,13 @@ func runAPI(
 		request.Body([]byte(options.data))
 	}
 	raw, requestErr := request.DoRaw(ctx)
+	var status apierrors.APIStatus
+	if errors.As(requestErr, &status) {
+		statusCode := status.Status().Code
+		if statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
+			requestErr = nil
+		}
+	}
 
 	var writeErr error
 	if len(raw) > 0 {
