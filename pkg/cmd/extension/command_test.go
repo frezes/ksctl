@@ -87,7 +87,7 @@ func TestNewCommandHelpUsesParentDisplayName(t *testing.T) {
 	}
 }
 
-func TestScopeRejectsExplicitClusterAndNamespaceBeforeFactory(t *testing.T) {
+func TestScopeRejectsExplicitClusterBeforeFactory(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		args []string
@@ -97,16 +97,6 @@ func TestScopeRejectsExplicitClusterAndNamespaceBeforeFactory(t *testing.T) {
 			name: "cluster",
 			args: []string{"--cluster", "member-a", "extension", "list"},
 			want: "--cluster is not supported",
-		},
-		{
-			name: "namespace",
-			args: []string{"--namespace", "project-a", "extension", "list"},
-			want: "--namespace is not supported",
-		},
-		{
-			name: "namespace shorthand",
-			args: []string{"-n", "project-a", "extension", "list"},
-			want: "--namespace is not supported",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -185,7 +175,6 @@ func scopeTestRoot(t *testing.T, factory ServiceFactory) *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().String("cluster", "", "")
-	root.PersistentFlags().StringP("namespace", "n", "", "")
 	streams := genericiooptions.IOStreams{
 		In:     strings.NewReader(""),
 		Out:    io.Discard,

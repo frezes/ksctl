@@ -15,21 +15,20 @@ The flag is defined locally on:
 - `logs`
 - `top pod`
 
-The supported form remains:
+The documented form places the local flag after its resource command:
 
 ```text
 ksctl get pods -n demo
 ```
 
-The former root-scoped form is no longer supported:
-
-```text
-ksctl -n demo get pods
-```
-
 Commands that do not select namespaced Kubernetes resources, including
 `auth`, `config`, `api`, `tenant`, `extension`, `version`, and `top node`, do
 not advertise or accept the flag.
+
+Cobra may also parse a local flag placed before the matching subcommand while
+traversing the command tree. That ordering is not documented as a stable
+interface; the flag remains local because it is registered and advertised
+only by the resource command.
 
 ## Implementation
 
@@ -57,8 +56,7 @@ Command-tree tests verify that:
 - `get`, `describe`, `logs`, and `top pod` define `--namespace` with `-n`;
 - `top node` and non-resource commands do not define it;
 - namespace selection after an applicable command still reaches the
-  Kubernetes RESTClientGetter; and
-- placing `--namespace` before the command fails as an unknown root flag.
+  Kubernetes RESTClientGetter.
 
 Existing resource integration tests continue to cover namespace-aware request
 paths. Extension scope tests retain explicit cluster coverage and remove the

@@ -13,10 +13,5 @@ func rejectExplicitScope(command *cobra.Command) error {
 			"--cluster is not supported by extension commands; use --clusters for placement or diagnose --target-cluster to select member status",
 		)
 	}
-	if flag := root.PersistentFlags().Lookup("namespace"); flag != nil && flag.Changed {
-		return fmt.Errorf(
-			"--namespace is not supported because extension resources are cluster-scoped",
-		)
-	}
 	return nil
 }

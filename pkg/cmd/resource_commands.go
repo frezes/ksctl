@@ -16,12 +16,20 @@ func newResourceCommands(
 	displayName string,
 	factory cmdutil.Factory,
 	streams genericiooptions.IOStreams,
+	namespace *string,
 ) []*cobra.Command {
+	get := getcmd.NewCmdGet(displayName, factory, streams)
+	describe := describecmd.NewCmdDescribe(displayName, factory, streams)
+	logs := logscmd.NewCmdLogs(factory, streams)
+	for _, command := range []*cobra.Command{get, describe, logs} {
+		addNamespaceFlag(command, namespace)
+	}
+
 	commands := []*cobra.Command{
-		getcmd.NewCmdGet(displayName, factory, streams),
-		describecmd.NewCmdDescribe(displayName, factory, streams),
-		logscmd.NewCmdLogs(factory, streams),
-		newTopCommand(factory, streams),
+		get,
+		describe,
+		logs,
+		newTopCommand(factory, streams, namespace),
 	}
 	for _, command := range commands {
 		rewriteKubectlExamples(command, displayName)
@@ -32,6 +40,7 @@ func newResourceCommands(
 func newTopCommand(
 	factory cmdutil.Factory,
 	streams genericiooptions.IOStreams,
+	namespace *string,
 ) *cobra.Command {
 	command := topcmd.NewCmdTop(factory, streams)
 	for _, child := range command.Commands() {
@@ -41,7 +50,7 @@ func newTopCommand(
 		}
 	}
 	command.AddCommand(
-		newTopPodCommand(factory, streams),
+		newTopPodCommand(factory, streams, namespace),
 		newTopNodeCommand(factory, streams),
 	)
 	return command
@@ -50,6 +59,7 @@ func newTopCommand(
 func newTopPodCommand(
 	factory cmdutil.Factory,
 	streams genericiooptions.IOStreams,
+	namespace *string,
 ) *cobra.Command {
 	options := &topcmd.TopPodOptions{
 		IOStreams:          streams,
@@ -64,7 +74,18 @@ func newTopPodCommand(
 		cmdutil.CheckErr(options.Validate())
 		cmdutil.CheckErr(options.RunTopPod())
 	}
+	addNamespaceFlag(command, namespace)
 	return command
+}
+
+func addNamespaceFlag(command *cobra.Command, namespace *string) {
+	command.Flags().StringVarP(
+		namespace,
+		"namespace",
+		"n",
+		"",
+		"Kubernetes namespace or KubeSphere project",
+	)
 }
 
 func newTopNodeCommand(
