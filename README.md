@@ -69,8 +69,9 @@ password without echo, and selects the new Context for later commands.
 
 ## Documentation
 
-- [CLI guide](docs/cli.md) — commands, authentication, configuration, resource
-  workflows, kubeconfig generation, and plugins.
+- [CLI guide (English)](docs/cli.md) — commands, scope, workflows, and
+  troubleshooting.
+- [CLI 指南（简体中文）](docs/cli_zh.md) — ksctl 命令、作用域、工作流和故障排查。
 - [Design](docs/design.md) — architecture, client boundaries, routing,
   persistence, security properties, and compatibility.
 

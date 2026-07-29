@@ -1,5 +1,7 @@
 # ksctl CLI Guide
 
+**English** | [简体中文](cli_zh.md)
+
 ## Introduction
 
 `ksctl` is a command-line client for KubeSphere 4.x. It connects to a
