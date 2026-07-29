@@ -169,9 +169,11 @@ Workspace or tenant Cluster requests. Output can be `table`, `json`, or
 ## Manage extensions
 
 Extension resources are always managed on the KubeSphere host. A Context
-default Cluster is ignored, while explicitly passing the root `--cluster` or
-`--namespace` flag returns an error. Use extension placement flags to select
-member Clusters, or `diagnose --target-cluster` to inspect a member status.
+default Cluster is ignored, while explicitly passing the global `--cluster`
+flag returns an error. Extension commands do not define the
+resource-command-local `--namespace` flag. Use extension placement flags to
+select member Clusters, or `diagnose --target-cluster` to inspect a member
+status.
 
 | Command | Purpose |
 | --- | --- |
@@ -327,9 +329,12 @@ plugins you trust.
 | `--token TOKEN` | Override the KubeSphere bearer Token. |
 | `--context NAME` | Use a named ksctl Context. |
 | `--cluster NAME` | Select a KubeSphere member Cluster. |
-| `-n, --namespace NAME` | Select a Kubernetes Namespace or KubeSphere Project. |
 | `--request-timeout DURATION` | Limit one server request; `0` means no limit. |
 | `-v, --v LEVEL` | Set log verbosity. |
+
+Kubernetes resource commands define `-n, --namespace NAME` locally. Place it
+after `get`, `describe`, `logs`, or `top pod` to select a Kubernetes Namespace
+or KubeSphere Project; it is not a global connection flag.
 
 | Variable | Purpose |
 | --- | --- |
