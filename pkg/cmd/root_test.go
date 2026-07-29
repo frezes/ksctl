@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -599,6 +600,87 @@ func TestRootConnectionFlags(t *testing.T) {
 		if cmd.PersistentFlags().Lookup(name) != nil {
 			t.Errorf("persistent flag --%s is registered", name)
 		}
+	}
+}
+
+func TestRootRegistersAPICommandForBothEntrypoints(t *testing.T) {
+	for _, root := range []*cobra.Command{
+		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+	} {
+		api := findSubcommand(root, "api")
+		if api == nil {
+			t.Fatalf("%s does not register api", root.DisplayName())
+		}
+		for _, name := range []string{"method", "data"} {
+			if api.Flags().Lookup(name) == nil {
+				t.Errorf("%s api flag --%s is not registered", root.DisplayName(), name)
+			}
+		}
+	}
+}
+
+func TestRootAPIDoesNotApplyClusterScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		setUp    func(t *testing.T, host string) []string
+		wantAuth string
+	}{
+		{
+			name: "explicit cluster",
+			setUp: func(t *testing.T, host string) []string {
+				t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+				return []string{
+					"api", "/kapis/example.io/v1/items?limit=1",
+					"--endpoint", host,
+					"--token", "flag-token",
+					"--cluster", "flag-member",
+				}
+			},
+			wantAuth: "Bearer flag-token",
+		},
+		{
+			name: "context default cluster",
+			setUp: func(t *testing.T, host string) []string {
+				configPath := filepath.Join(t.TempDir(), "config.yaml")
+				saveKubeconfigTestConfig(t, configPath, host, "alice", "context-member", "context-token")
+				t.Setenv("KSCTL_CONFIG", configPath)
+				return []string{"api", "/kapis/example.io/v1/items?limit=1"}
+			},
+			wantAuth: "Bearer context-token",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := make(chan *http.Request, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				requests <- request.Clone(request.Context())
+				_, _ = w.Write([]byte("ok"))
+			}))
+			t.Cleanup(server.Close)
+
+			out := new(bytes.Buffer)
+			command := NewRootCommand(
+				IOStreams{Out: out, ErrOut: io.Discard},
+				VersionInfo{Version: "test"},
+			)
+			command.SetArgs(test.setUp(t, server.URL))
+
+			if err := command.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			request := <-requests
+			if request.URL.RequestURI() != "/kapis/example.io/v1/items?limit=1" {
+				t.Fatalf("request URI = %q", request.URL.RequestURI())
+			}
+			if got := request.Header.Get("Authorization"); got != test.wantAuth {
+				t.Fatalf("Authorization = %q, want %q", got, test.wantAuth)
+			}
+			if out.String() != "ok" {
+				t.Fatalf("output = %q, want ok", out.String())
+			}
+		})
 	}
 }
 

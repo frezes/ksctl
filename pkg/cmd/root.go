@@ -99,6 +99,7 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 	cmd.AddCommand(newVersionCommand(info, kubernetesGetter))
 	cmd.AddCommand(newConfigCommand(kubeSphereGetter))
 	cmd.AddCommand(newAuthCommand(connection.UserAgent, oauth, kubeSphereGetter))
+	cmd.AddCommand(newAPICommand(kubeSphereGetter, kubeSphereFactory))
 	cmd.AddCommand(newExtensionCommand(
 		cmd.DisplayName(),
 		streams,
