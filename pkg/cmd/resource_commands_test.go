@@ -2,9 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,6 +20,359 @@ import (
 	"github.com/kubesphere/ksctl/pkg/config"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestNativeTopPodUsesFallbackDiscoveryThroughSpecifiedCluster(t *testing.T) {
+	server := newClusterScopedMetricsAPIServer(t, "member")
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	cmd.SetArgs([]string{
+		"top", "pod",
+		"--namespace", "demo",
+		"--use-protocol-buffers=false",
+		"--endpoint", server.URL,
+		"--token", "secret",
+		"--cluster", "member",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{"demo-pod", "125m", "64Mi"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("top pod output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestNativeTopPodAllNamespacesForwardsSelector(t *testing.T) {
+	server := newClusterScopedMetricsAPIServer(t, "member")
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	cmd.SetArgs([]string{
+		"top", "pod",
+		"--all-namespaces",
+		"--selector", "app=demo",
+		"--use-protocol-buffers=false",
+		"--endpoint", server.URL,
+		"--token", "secret",
+		"--cluster", "member",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{"demo", "demo-pod", "125m", "64Mi"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("top pod -A output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestNativeTopNodeUsesFallbackDiscoveryThroughSpecifiedCluster(t *testing.T) {
+	server := newClusterScopedMetricsAPIServer(t, "member")
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	cmd.SetArgs([]string{
+		"top", "node",
+		"--use-protocol-buffers=false",
+		"--endpoint", server.URL,
+		"--token", "secret",
+		"--cluster", "member",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{"member-node", "250m", "25%", "256Mi"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("top node output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestNativeTopReportsUnavailableMetricsAPI(t *testing.T) {
+	const helperEnv = "KSCTL_TEST_TOP_NO_METRICS"
+	if os.Getenv(helperEnv) == "1" {
+		cmd := NewRootCommand(
+			IOStreams{Out: os.Stdout, ErrOut: os.Stderr},
+			VersionInfo{Version: "test"},
+		)
+		cmd.SetArgs([]string{
+			"top", "pod",
+			"--use-protocol-buffers=false",
+			"--endpoint", os.Getenv("KSCTL_TEST_TOP_ENDPOINT"),
+			"--token", "secret",
+		})
+		_ = cmd.Execute()
+		return
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api":
+			writeAPIJSON(t, w, metav1.APIVersions{
+				TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"},
+				Versions: []string{"v1"},
+			})
+		case "/apis":
+			writeAPIJSON(t, w, metav1.APIGroupList{
+				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	helper := exec.Command(os.Args[0], "-test.run=^TestNativeTopReportsUnavailableMetricsAPI$")
+	helper.Env = append(
+		os.Environ(),
+		helperEnv+"=1",
+		"KSCTL_TEST_TOP_ENDPOINT="+server.URL,
+		"KSCTL_CONFIG="+filepath.Join(t.TempDir(), "config.yaml"),
+	)
+	output, err := helper.CombinedOutput()
+	if err == nil {
+		t.Fatalf("top helper succeeded, output:\n%s", output)
+	}
+	if !strings.Contains(string(output), "Metrics API not available") {
+		t.Fatalf("top helper output = %q, want Metrics API not available", output)
+	}
+}
+
+func TestNativeTopPreservesForbiddenMetricsError(t *testing.T) {
+	const helperEnv = "KSCTL_TEST_TOP_FORBIDDEN"
+	if os.Getenv(helperEnv) == "1" {
+		cmd := NewRootCommand(
+			IOStreams{Out: os.Stdout, ErrOut: os.Stderr},
+			VersionInfo{Version: "test"},
+		)
+		cmd.SetArgs([]string{
+			"top", "pod",
+			"--use-protocol-buffers=false",
+			"--endpoint", os.Getenv("KSCTL_TEST_TOP_ENDPOINT"),
+			"--token", "secret",
+		})
+		_ = cmd.Execute()
+		return
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api":
+			writeAPIJSON(t, w, metav1.APIVersions{
+				TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"},
+				Versions: []string{"v1"},
+			})
+		case "/apis":
+			writeAPIJSON(t, w, metav1.APIGroupList{
+				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+				Groups: []metav1.APIGroup{{
+					Name: "metrics.k8s.io",
+					Versions: []metav1.GroupVersionForDiscovery{{
+						GroupVersion: "metrics.k8s.io/v1beta1",
+						Version:      "v1beta1",
+					}},
+					PreferredVersion: metav1.GroupVersionForDiscovery{
+						GroupVersion: "metrics.k8s.io/v1beta1",
+						Version:      "v1beta1",
+					},
+				}},
+			})
+		case "/apis/metrics.k8s.io/v1beta1/namespaces/default/pods":
+			w.WriteHeader(http.StatusForbidden)
+			writeAPIJSON(t, w, metav1.Status{
+				TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
+				Status:   metav1.StatusFailure,
+				Message:  "podmetrics.metrics.k8s.io is forbidden",
+				Reason:   metav1.StatusReasonForbidden,
+				Code:     http.StatusForbidden,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	helper := exec.Command(os.Args[0], "-test.run=^TestNativeTopPreservesForbiddenMetricsError$")
+	helper.Env = append(
+		os.Environ(),
+		helperEnv+"=1",
+		"KSCTL_TEST_TOP_ENDPOINT="+server.URL,
+		"KSCTL_CONFIG="+filepath.Join(t.TempDir(), "config.yaml"),
+	)
+	output, err := helper.CombinedOutput()
+	if err == nil {
+		t.Fatalf("top helper succeeded, output:\n%s", output)
+	}
+	if !strings.Contains(string(output), "podmetrics.metrics.k8s.io is forbidden") {
+		t.Fatalf("top helper output = %q, want forbidden Status error", output)
+	}
+}
+
+func TestNativeLogsThroughSpecifiedCluster(t *testing.T) {
+	server := newClusterScopedLogsAPIServer(t, "member")
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	cmd.SetArgs([]string{
+		"logs", "demo-pod",
+		"--namespace", "default",
+		"--container", "demo",
+		"--tail", "2",
+		"--endpoint", server.URL,
+		"--token", "secret",
+		"--cluster", "member",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got, want := out.String(), "line one\nline two\n"; got != want {
+		t.Fatalf("logs output = %q, want %q", got, want)
+	}
+}
+
+func TestNativeLogsUsesContextDefaultCluster(t *testing.T) {
+	server := newClusterScopedLogsAPIServer(t, "context-member")
+	defer server.Close()
+	t.Setenv("KS_ENDPOINT", "")
+	t.Setenv("KS_TOKEN", "")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("KSCTL_CONFIG", configPath)
+
+	cfg := config.New()
+	cfg.CurrentContext = "local"
+	cfg.Fleets["local"] = config.Fleet{
+		Host:  server.URL,
+		Users: map[string]config.User{"admin": {BearerToken: "secret"}},
+	}
+	cfg.Contexts["local"] = config.Context{
+		Fleet:          "local",
+		User:           "admin",
+		DefaultCluster: "context-member",
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	cmd.SetArgs([]string{
+		"logs", "demo-pod",
+		"--namespace", "default",
+		"--container", "demo",
+		"--tail", "2",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got, want := out.String(), "line one\nline two\n"; got != want {
+		t.Fatalf("logs output = %q, want %q", got, want)
+	}
+}
+
+func TestNativeLogsResolvesWorkloadWithDiscoveryFallback(t *testing.T) {
+	server := newFallbackDiscoveryKSApiServer(t)
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	out := new(bytes.Buffer)
+	cmd := NewRootCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	cmd.SetArgs([]string{
+		"logs", "deployment/demo-deployment",
+		"--namespace", "default",
+		"--all-pods",
+		"--all-containers",
+		"--endpoint", server.URL,
+		"--token", "secret",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "deployment log\n") {
+		t.Fatalf("logs output = %q, want deployment log", out.String())
+	}
+}
+
+func TestNativeLogsFollowStopsWhenContextIsCancelled(t *testing.T) {
+	out := newNotifyingBuffer("streamed line\n")
+	server := newStreamingLogsAPIServer(t)
+	defer server.Close()
+	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := NewRootCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "test"},
+	)
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{
+		"logs", "demo-pod",
+		"--namespace", "default",
+		"--follow",
+		"--ignore-errors",
+		"--endpoint", server.URL,
+		"--token", "secret",
+	})
+
+	result := make(chan error, 1)
+	go func() {
+		result <- cmd.Execute()
+	}()
+
+	select {
+	case <-out.observed:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for followed log output")
+	}
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("followed logs did not stop after cancellation")
+	}
+	if !strings.Contains(out.String(), "streamed line\n") {
+		t.Fatalf("logs output = %q, want streamed line", out.String())
+	}
+}
 
 func TestNativeGetThroughKSApiServer(t *testing.T) {
 	server := newFakeKSApiServer(t)
@@ -402,6 +759,260 @@ func TestRootRefreshesExpiredCacheBeforeResourceRequest(t *testing.T) {
 	}
 }
 
+func newClusterScopedLogsAPIServer(t *testing.T, cluster string) *httptest.Server {
+	t.Helper()
+	prefix := "/clusters/" + cluster
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		if !strings.HasPrefix(r.URL.Path, prefix+"/") {
+			t.Errorf("path = %q, want prefix %q", r.URL.Path, prefix+"/")
+			http.NotFound(w, r)
+			return
+		}
+
+		switch strings.TrimPrefix(r.URL.Path, prefix) {
+		case "/api":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, metav1.APIVersions{
+				TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"},
+				Versions: []string{"v1"},
+			})
+		case "/apis":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, metav1.APIGroupList{
+				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+			})
+		case "/api/v1":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{{
+					Name:         "pods",
+					SingularName: "pod",
+					Namespaced:   true,
+					Kind:         "Pod",
+					Verbs:        metav1.Verbs{"get", "list"},
+					ShortNames:   []string{"po"},
+				}},
+			})
+		case "/api/v1/namespaces/default/pods/demo-pod":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, podObject())
+		case "/api/v1/namespaces/default/pods/demo-pod/log":
+			if got := r.URL.Query().Get("container"); got != "demo" {
+				t.Errorf("container = %q, want demo", got)
+			}
+			if got := r.URL.Query().Get("tailLines"); got != "2" {
+				t.Errorf("tailLines = %q, want 2", got)
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = io.WriteString(w, "line one\nline two\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func newClusterScopedMetricsAPIServer(t *testing.T, cluster string) *httptest.Server {
+	t.Helper()
+	prefix := "/clusters/" + cluster
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		if !strings.HasPrefix(r.URL.Path, prefix+"/") {
+			t.Errorf("path = %q, want prefix %q", r.URL.Path, prefix+"/")
+			http.NotFound(w, r)
+			return
+		}
+		path := strings.TrimPrefix(r.URL.Path, prefix)
+		w.Header().Set("Content-Type", "application/json")
+
+		switch path {
+		case "/api", "/apis":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, "<!doctype html><title>KubeSphere</title>")
+		case "/api/v1":
+			writeAPIJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{
+						Name:       "pods",
+						Namespaced: true,
+						Kind:       "Pod",
+						Verbs:      metav1.Verbs{"get", "list"},
+					},
+					{
+						Name:       "nodes",
+						Namespaced: false,
+						Kind:       "Node",
+						Verbs:      metav1.Verbs{"get", "list"},
+					},
+				},
+			})
+		case "/apis/apiextensions.k8s.io/v1/customresourcedefinitions",
+			"/apis/extensions.kubesphere.io/v1alpha1/apiservices":
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "v1",
+				"kind":       "List",
+				"metadata":   map[string]any{},
+				"items":      []any{},
+			})
+		case "/apis/apiregistration.k8s.io/v1/apiservices":
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "apiregistration.k8s.io/v1",
+				"kind":       "APIServiceList",
+				"metadata":   map[string]any{},
+				"items": []any{map[string]any{
+					"spec": map[string]any{
+						"group":   "metrics.k8s.io",
+						"version": "v1beta1",
+					},
+				}},
+			})
+		case "/apis/metrics.k8s.io/v1beta1":
+			writeAPIJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "metrics.k8s.io/v1beta1",
+				APIResources: []metav1.APIResource{
+					{Name: "pods", Namespaced: true, Kind: "PodMetrics", Verbs: metav1.Verbs{"get", "list"}},
+					{Name: "nodes", Namespaced: false, Kind: "NodeMetrics", Verbs: metav1.Verbs{"get", "list"}},
+				},
+			})
+		case "/apis/metrics.k8s.io/v1beta1/namespaces/demo/pods",
+			"/apis/metrics.k8s.io/v1beta1/pods":
+			if path == "/apis/metrics.k8s.io/v1beta1/pods" {
+				if got := r.URL.Query().Get("labelSelector"); got != "app=demo" {
+					t.Errorf("labelSelector = %q, want app=demo", got)
+				}
+			}
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "metrics.k8s.io/v1beta1",
+				"kind":       "PodMetricsList",
+				"items": []any{map[string]any{
+					"metadata":  map[string]any{"name": "demo-pod", "namespace": "demo"},
+					"timestamp": "2026-07-29T00:00:00Z",
+					"window":    "30s",
+					"containers": []any{map[string]any{
+						"name":  "demo",
+						"usage": map[string]any{"cpu": "125m", "memory": "64Mi"},
+					}},
+				}},
+			})
+		case "/apis/metrics.k8s.io/v1beta1/nodes":
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "metrics.k8s.io/v1beta1",
+				"kind":       "NodeMetricsList",
+				"items": []any{map[string]any{
+					"metadata":  map[string]any{"name": "member-node"},
+					"timestamp": "2026-07-29T00:00:00Z",
+					"window":    "30s",
+					"usage":     map[string]any{"cpu": "250m", "memory": "256Mi"},
+				}},
+			})
+		case "/api/v1/nodes":
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "v1",
+				"kind":       "NodeList",
+				"items": []any{map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Node",
+					"metadata":   map[string]any{"name": "member-node"},
+					"status": map[string]any{
+						"allocatable": map[string]any{"cpu": "1", "memory": "1Gi"},
+						"capacity":    map[string]any{"cpu": "2", "memory": "2Gi"},
+					},
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+type notifyingBuffer struct {
+	lock     sync.Mutex
+	buffer   bytes.Buffer
+	match    string
+	observed chan struct{}
+	once     sync.Once
+}
+
+func newNotifyingBuffer(match string) *notifyingBuffer {
+	return &notifyingBuffer{
+		match:    match,
+		observed: make(chan struct{}),
+	}
+}
+
+func (b *notifyingBuffer) Write(data []byte) (int, error) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	written, err := b.buffer.Write(data)
+	if strings.Contains(b.buffer.String(), b.match) {
+		b.once.Do(func() { close(b.observed) })
+	}
+	return written, err
+}
+
+func (b *notifyingBuffer) String() string {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	return b.buffer.String()
+}
+
+func newStreamingLogsAPIServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		switch r.URL.Path {
+		case "/api":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, metav1.APIVersions{
+				TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"},
+				Versions: []string{"v1"},
+			})
+		case "/apis":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, metav1.APIGroupList{
+				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+			})
+		case "/api/v1":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{{
+					Name:         "pods",
+					SingularName: "pod",
+					Namespaced:   true,
+					Kind:         "Pod",
+					Verbs:        metav1.Verbs{"get", "list"},
+				}},
+			})
+		case "/api/v1/namespaces/default/pods/demo-pod":
+			w.Header().Set("Content-Type", "application/json")
+			writeAPIJSON(t, w, podObject())
+		case "/api/v1/namespaces/default/pods/demo-pod/log":
+			w.Header().Set("Content-Type", "text/plain")
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Error("response writer does not support flushing")
+				return
+			}
+			_, _ = io.WriteString(w, "streamed line\n")
+			flusher.Flush()
+			<-r.Context().Done()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
 func newClusterScopedCoreAPIServer(t *testing.T, cluster string) *httptest.Server {
 	t.Helper()
 	prefix := "/clusters/" + cluster
@@ -619,6 +1230,30 @@ func newFallbackDiscoveryKSApiServer(t *testing.T) *httptest.Server {
 					ShortNames:   []string{"deploy"},
 				}},
 			})
+		case "/apis/apps/v1/namespaces/default/deployments/demo-deployment":
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]any{
+					"name":      "demo-deployment",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"selector": map[string]any{
+						"matchLabels": map[string]any{"app": "demo"},
+					},
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"labels": map[string]any{"app": "demo"},
+						},
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{"name": "demo", "image": "nginx:latest"},
+							},
+						},
+					},
+				},
+			})
 		case "/apis/example.io/v1":
 			writeAPIJSON(t, w, metav1.APIResourceList{
 				GroupVersion: "example.io/v1",
@@ -643,6 +1278,17 @@ func newFallbackDiscoveryKSApiServer(t *testing.T) *httptest.Server {
 					},
 				}},
 			})
+		case "/api/v1/namespaces/default/pods":
+			pod := podObject()
+			pod["metadata"].(map[string]any)["labels"] = map[string]any{"app": "demo"}
+			writeAPIJSON(t, w, map[string]any{
+				"apiVersion": "v1",
+				"kind":       "PodList",
+				"items":      []any{pod},
+			})
+		case "/api/v1/namespaces/default/pods/demo-pod/log":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = io.WriteString(w, "deployment log\n")
 		case "/apis/example.io/v1/widgets":
 			writeAPIJSON(t, w, map[string]any{
 				"apiVersion": "example.io/v1",

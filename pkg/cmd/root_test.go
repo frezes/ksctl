@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -203,6 +204,50 @@ func TestKubectlPluginHelpUsesDisplayName(t *testing.T) {
 	}
 }
 
+func TestKubectlPluginLogsHelpUsesDisplayName(t *testing.T) {
+	out := new(bytes.Buffer)
+	cmd := NewKubectlPluginCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "dev"},
+	)
+	cmd.SetArgs([]string{"logs", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	help := out.String()
+	if !strings.Contains(help, "Usage:\n  kubectl ks logs") ||
+		strings.Contains(help, "Usage:\n  kubectl logs") {
+		t.Fatalf("plugin logs usage = %q", help)
+	}
+	if !strings.Contains(help, "kubectl ks logs nginx") ||
+		strings.Contains(help, "kubectl logs nginx") {
+		t.Fatalf("plugin logs examples should use kubectl ks: %q", help)
+	}
+}
+
+func TestKubectlPluginTopHelpUsesDisplayNameRecursively(t *testing.T) {
+	out := new(bytes.Buffer)
+	cmd := NewKubectlPluginCommand(
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "dev"},
+	)
+	cmd.SetArgs([]string{"top", "pod", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	help := out.String()
+	if !strings.Contains(help, "Usage:\n  kubectl ks top pod") ||
+		strings.Contains(help, "Usage:\n  kubectl top pod") {
+		t.Fatalf("plugin top pod usage = %q", help)
+	}
+	if !strings.Contains(help, "kubectl ks top pod") ||
+		strings.Contains(help, "kubectl top pod -l") {
+		t.Fatalf("plugin top pod examples should use kubectl ks: %q", help)
+	}
+}
+
 func TestRootRegistersNativeResourceCommands(t *testing.T) {
 	cmd := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
 
@@ -216,6 +261,27 @@ func TestRootRegistersNativeResourceCommands(t *testing.T) {
 	if findSubcommand(cmd, "list") != nil {
 		t.Fatal("list command is registered")
 	}
+	logsCommand := findSubcommand(cmd, "logs")
+	if logsCommand == nil {
+		t.Fatal("logs command is not registered")
+	}
+	for _, name := range []string{"follow", "previous", "container", "tail"} {
+		if logsCommand.Flags().Lookup(name) == nil {
+			t.Errorf("logs flag --%s is not registered", name)
+		}
+	}
+	topCommand := findSubcommand(cmd, "top")
+	if topCommand == nil {
+		t.Fatal("top command is not registered")
+	}
+	topPod := findSubcommand(topCommand, "pod")
+	if topPod == nil || topPod.Flags().Lookup("containers") == nil {
+		t.Fatal("top pod --containers is not registered")
+	}
+	topNode := findSubcommand(topCommand, "node")
+	if topNode == nil || topNode.Flags().Lookup("show-capacity") == nil {
+		t.Fatal("top node --show-capacity is not registered")
+	}
 	for _, name := range []string{"output", "watch", "watch-only", "selector"} {
 		if getCommand.Flags().Lookup(name) == nil {
 			t.Errorf("get flag --%s is not registered", name)
@@ -224,6 +290,40 @@ func TestRootRegistersNativeResourceCommands(t *testing.T) {
 	if describeCommand := findSubcommand(cmd, "describe"); describeCommand != nil {
 		if describeCommand.Flags().Lookup("show-events") == nil {
 			t.Error("describe flag --show-events is not registered")
+		}
+	}
+}
+
+func TestPluginListReportsLogsAndTopAsBuiltInConflicts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test plugin fixtures use Unix executable mode bits")
+	}
+	directory := t.TempDir()
+	for _, name := range []string{"ksctl-logs", "ksctl-top"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte("plugin"), 0o755); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+	}
+
+	out := new(bytes.Buffer)
+	errOut := new(bytes.Buffer)
+	root := NewRootCommand(
+		IOStreams{Out: out, ErrOut: errOut},
+		VersionInfo{Version: "test"},
+	)
+	root.SetArgs([]string{"plugin", "list", "--name-only"})
+	t.Setenv("PATH", directory)
+
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "2 plugin warnings") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{
+		`ksctl-logs overwrites existing command: "ksctl logs"`,
+		`ksctl-top overwrites existing command: "ksctl top"`,
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want %q", errOut.String(), want)
 		}
 	}
 }
