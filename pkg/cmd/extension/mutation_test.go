@@ -22,16 +22,6 @@ func TestLifecycleFlagValidationBeforeFactory(t *testing.T) {
 		want string
 	}{
 		{
-			name: "install version required",
-			args: []string{"extension", "install", "demo"},
-			want: "--version",
-		},
-		{
-			name: "install whitespace version",
-			args: []string{"extension", "install", "demo", "--version", "  "},
-			want: "--version",
-		},
-		{
 			name: "upgrade version required",
 			args: []string{"extension", "upgrade", "demo"},
 			want: "--version",
@@ -160,6 +150,37 @@ func TestInstallExposesNoClearFlags(t *testing.T) {
 		if install.Flags().Lookup(name) != nil {
 			t.Fatalf("install unexpectedly exposes --%s", name)
 		}
+	}
+}
+
+func TestInstallPassesEmptyVersionForServiceResolution(t *testing.T) {
+	streams, _, _ := bufferedStreams()
+	var got internalextension.InstallOptions
+	service := &fakeService{
+		installFn: func(
+			_ context.Context,
+			_ string,
+			options internalextension.InstallOptions,
+		) (internalextension.Operation, error) {
+			got = options
+			return internalextension.Operation{
+				Kind:          internalextension.OperationInstall,
+				Name:          "demo",
+				TargetVersion: "1.2.1",
+			}, nil
+		},
+	}
+	err := executeExtensionCommand(
+		t,
+		[]string{"extension", "install", "demo"},
+		streams,
+		func() (Service, error) { return service, nil },
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got.Version != "" {
+		t.Fatalf("Version = %q, want service-resolved empty value", got.Version)
 	}
 }
 

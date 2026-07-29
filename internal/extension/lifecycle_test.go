@@ -60,6 +60,9 @@ func TestServiceInstallCreatesExactEnabledManualPlan(t *testing.T) {
 		"demo",
 		lifecycleVersion("demo", "1.2.1", "Multicluster"),
 	)
+	extension := extensionForTest("demo")
+	extension.Status.RecommendedVersion = "2.0.0"
+	client.extensionObjects["demo"] = objectForTest(t, extension)
 	config := "key: value\r\n"
 
 	operation, err := NewService(client).Install(context.Background(), "demo", InstallOptions{
@@ -89,6 +92,53 @@ func TestServiceInstallCreatesExactEnabledManualPlan(t *testing.T) {
 	if operation.Kind != OperationInstall || operation.Name != "demo" ||
 		operation.TargetVersion != "1.2.1" {
 		t.Fatalf("operation = %#v", operation)
+	}
+}
+
+func TestServiceInstallUsesRecommendedVersionWhenVersionIsOmitted(t *testing.T) {
+	client := newFakeAPIClient(t)
+	version := lifecycleVersion("demo", "1.2.1", "HostOnly")
+	prepareExtensionForLifecycle(t, client, "demo", version)
+	extension := extensionForTest("demo")
+	extension.Status.RecommendedVersion = "1.2.1"
+	client.extensionObjects["demo"] = objectForTest(t, extension)
+
+	operation, err := NewService(client).Install(
+		context.Background(),
+		"demo",
+		InstallOptions{},
+	)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if got := client.createdPlans[0].Spec.Extension.Version; got != "1.2.1" {
+		t.Fatalf("created version = %q, want 1.2.1", got)
+	}
+	if operation.TargetVersion != "1.2.1" {
+		t.Fatalf("operation target = %q, want 1.2.1", operation.TargetVersion)
+	}
+}
+
+func TestServiceInstallRejectsMissingRecommendedVersionWithoutWrite(t *testing.T) {
+	client := newFakeAPIClient(t)
+	client.extensionObjects["demo"] = objectForTest(t, extensionForTest("demo"))
+
+	_, err := NewService(client).Install(
+		context.Background(),
+		"demo",
+		InstallOptions{},
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "extension versions demo") {
+		t.Fatalf("Install() error = %v, want versions hint", err)
+	}
+	if len(client.createdPlans) != 0 {
+		t.Fatalf("created plans = %#v", client.createdPlans)
+	}
+	for _, call := range client.calls {
+		if strings.HasPrefix(call, "get extension version ") {
+			t.Fatalf("unexpected version lookup: %q", call)
+		}
 	}
 }
 

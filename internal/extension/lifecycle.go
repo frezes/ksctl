@@ -54,12 +54,22 @@ func (s *Service) Install(
 	if err := validatePathName("extension", name); err != nil {
 		return Operation{}, err
 	}
-	if strings.TrimSpace(options.Version) == "" {
-		return Operation{}, fmt.Errorf("exact extension version is required")
-	}
-	if _, err := s.client.GetExtension(ctx, name); err != nil {
+	extension, err := s.client.GetExtension(ctx, name)
+	if err != nil {
 		return Operation{}, fmt.Errorf("get extension %q: %w", name, err)
 	}
+	selectedVersion := options.Version
+	if strings.TrimSpace(selectedVersion) == "" {
+		selectedVersion = extension.Value.Status.RecommendedVersion
+		if strings.TrimSpace(selectedVersion) == "" {
+			return Operation{}, fmt.Errorf(
+				"extension %q has no recommended version; run extension versions %s",
+				name,
+				name,
+			)
+		}
+	}
+	options.Version = selectedVersion
 	version, err := s.exactVersion(ctx, name, options.Version)
 	if err != nil {
 		return Operation{}, err
