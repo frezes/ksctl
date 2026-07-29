@@ -1,179 +1,273 @@
 # ksctl CLI Guide
 
-## Overview
+**English** | [简体中文](cli_zh.md)
 
-`ksctl` is a command-line client for inspecting KubeSphere 4.x resources and
-the Kubernetes resources exposed through KubeSphere. Its generic built-in
-resource commands are read-only: `get` displays resources, `describe` displays
-their detailed state, `logs` reads container logs, and `top` displays current
-Metrics Server CPU/memory usage. The purpose-built `extension` group is the
-controlled exception for KubeSphere extension lifecycle management.
+## Introduction
 
-The release provides two equivalent entrypoints backed by the same command
-tree:
+`ksctl` is a command-line client for KubeSphere 4.x. It connects to a
+KubeSphere Endpoint and lets you inspect Kubernetes resources exposed through
+KubeSphere, inspect tenant resources, and manage KubeSphere extensions.
+
+The same command tree is available through two entrypoints:
 
 ```bash
-ksctl get workspaces
-kubectl ks get workspaces
+ksctl get pods -A
+kubectl ks get pods -A
 ```
 
-The examples in this guide use `ksctl`. Replace `ksctl` with `kubectl ks` when
-using the kubectl plugin.
+Examples in this guide use `ksctl`. Replace it with `kubectl ks` when using the
+kubectl plugin.
 
-## Prerequisites
+The generic resource commands (`get`, `describe`, `logs`, and `top`) and tenant
+commands are read-only. Extension lifecycle commands such as `install`,
+`configure`, and `uninstall` change KubeSphere state.
 
-- A reachable KubeSphere 4.x API endpoint
-- A KubeSphere account or bearer token
-- Metrics Server with `metrics.k8s.io/v1beta1` for `top` commands
-- The `ksctl` executable, or the `kubectl-ks` executable on `PATH` for use as
-  `kubectl ks`
+Before you begin, you need:
+
+- A reachable KubeSphere 4.x API Endpoint.
+- A KubeSphere account or bearer Token.
+- The `ksctl` executable, or `kubectl-ks` on `PATH`.
+- Metrics Server in a Cluster where you want to use `top`.
 
 ## Command syntax
 
+Commands generally follow this form:
+
 ```text
-ksctl get TYPE [NAME] [flags]
-ksctl describe TYPE [NAME_PREFIX] [flags]
-ksctl logs (POD | TYPE/NAME) [flags]
-ksctl top (pod | node) [NAME] [flags]
+ksctl COMMAND [TYPE] [NAME] [flags]
 ```
 
-Resource names are resolved from server discovery. Singular, plural, short,
-versioned, and group-qualified names are accepted where the selected kubectl
-command supports them. Use command-specific help for exact arguments and
-flags.
-
-Use built-in help to inspect the live command surface:
+Use built-in help as the complete reference for the installed release:
 
 ```bash
 ksctl help
-ksctl get --help
-ksctl config generate kubeconfig --help
+ksctl COMMAND --help
 ```
 
-## Commands
+## Command groups
 
-| Command | Description |
-| --- | --- |
-| `ksctl get TYPE [NAME]` | Display one or more resources. |
-| `ksctl describe TYPE [NAME_PREFIX]` | Display resource details and related information. |
-| `ksctl logs (POD \| TYPE/NAME)` | Print or follow logs from one or more Pod containers. |
-| `ksctl top (pod \| node) [NAME]` | Display current Metrics Server CPU/memory usage. |
-| `ksctl tenant get RESOURCE` | Display KSE tenant Workspaces, Namespaces, or Clusters. |
-| `ksctl auth login [ENDPOINT]` | Authenticate with a username and password, then save a Context and token cache. |
-| `ksctl auth whoami` | Verify the selected credential and display the server-side User and global role. |
-| `ksctl auth logout [CONTEXT]` | Delete cached login credentials for the current or named Context. |
-| `ksctl config view` | Display the merged configuration, redacted by default. |
-| `ksctl config current-context` | Display the current Context name. |
-| `ksctl config use-context NAME` | Select an existing Context. |
-| `ksctl config generate kubeconfig` | Write the selected user's kubeconfig to stdout. |
-| `ksctl extension` | Discover, install, configure, diagnose, and remove KubeSphere extensions. |
-| `ksctl plugin list` | List and diagnose `ksctl-*` executable plugins on `PATH`. |
-| `ksctl completion SHELL` | Generate a completion script for bash, fish, PowerShell, or zsh. |
-| `ksctl version` | Display the ksctl, KubeSphere, and Kubernetes versions. |
+| Group | Use it to | Commands | Availability |
+| --- | --- | --- | --- |
+| Kubernetes resource management | Inspect Kubernetes and discovered KubeSphere resources. | `get`, `describe`, `logs`, `top` | Available |
+| Cluster management | Manage the KubeSphere host and member Clusters. | — | Not yet available |
+| Tenant management | Inspect Workspaces and their Namespaces and Clusters. | `tenant` | Available |
+| Extension management | Discover, install, configure, diagnose, and remove extensions. | `extension` | Available |
+| Application management | Manage KubeSphere applications. | — | Not yet available |
+| Other | Authenticate, select Contexts, call APIs, generate kubeconfig, and use plugins. | `auth`, `config`, `api`, `plugin` | Available |
 
-## Authentication
+## Manage Kubernetes resources
 
-### Interactive login
+The resource commands use kubectl-compatible discovery, selectors, printers,
+and workload log behavior. Resource types and their scope come from the
+connected server rather than a static registry in ksctl.
 
-Omitting the Endpoint, Username, or Password in a terminal starts the guided
-login flow:
-
-```text
-$ ksctl auth login
-endpoint: https://kubesphere.example.com
-username: admin
-password:
-fleet [kubesphere.example.com]:
-context [kubesphere.example.com-admin]:
-Logged in to "kubesphere.example.com-admin"
-```
-
-The password is read without echo, used only for the login request, and not
-persisted. Press Enter at the Fleet and Context prompts to accept their derived
-defaults. Fleet defaults to the Endpoint Host; Context defaults to
-`<fleet>-<username>`. The new Context becomes current.
-
-### Non-interactive login
-
-When Endpoint, Username, and Password are all supplied, login does not prompt.
-Omitted Fleet and Context names are derived silently, which makes the command
-suitable for scripts:
-
-```bash
-export KS_PASSWORD='your-password'
-ksctl auth login https://prod.example.com \
-  --username admin \
-  --password "$KS_PASSWORD" \
-  --fleet prod \
-  --context prod-admin
-```
-
-Take care not to expose the password through shell history, logs, or process
-inspection when using `--password`.
-
-Each Fleet name is permanently associated with one normalized Endpoint.
-Logging in to an existing Fleet merges its Users and settings only when the
-Endpoint is unchanged (differences in surrounding whitespace or trailing `/`
-are ignored). To log in to another Endpoint, choose another Fleet name. A
-conflict is rejected before ksctl sends the OAuth request.
-
-### Current identity
-
-Verify the selected Context's credentials and display its server-side identity:
-
-```text
-$ ksctl auth whoami
-Username: admin
-Global Role: platform-admin
-```
-
-`auth whoami` requires a current or explicitly selected Context because the
-Context supplies the User name. It authenticates to KubeSphere and reads
-`/kapis/iam.kubesphere.io/v1beta1/users/<username>`; it does not merely echo
-local configuration. A User without the `iam.kubesphere.io/globalrole`
-annotation is displayed as `Global Role: <none>`.
-
-### Logout
-
-Log out the current Context or name another Context explicitly:
-
-```bash
-ksctl auth logout
-ksctl auth logout prod-admin
-```
-
-Logout makes a best-effort request to the Fleet's `/oauth/logout` endpoint
-using the cached Access Token, then removes the token cache for the selected
-Fleet and User regardless of the remote result. It does not delete Contexts or
-manually configured credentials. Contexts that select the same Fleet and User
-share that cache and logout state. A configured `bearerToken` or
-`bearerTokenFile` can still authenticate later commands.
-
-## Scope and connection selection
-
-ksctl separates connection identity from resource scope:
+### Select the resource scope
 
 | Concept | Meaning |
 | --- | --- |
-| Fleet | A KubeSphere Endpoint, TLS settings, and its Fleet-scoped Users. |
-| User | A KubeSphere username and optional configured credential sources within one Fleet. |
-| Context | A Fleet/User selection with an optional default Cluster. |
-| Cluster | A KubeSphere member Cluster selected for a request. |
-| Namespace | A Kubernetes Namespace or KubeSphere Project selected for a resource command. |
+| Context | Selects a Fleet, User, and optional default Cluster. |
+| Cluster | Selects the Kubernetes Cluster for a request; override it with `--cluster`. |
+| Namespace | Selects a Kubernetes Namespace or KubeSphere Project with `-n` or `--namespace`. |
+| All Namespaces | Uses `-A` or `--all-namespaces` where the command supports it. |
 
-The current Context supplies the Endpoint, User, and default Cluster. Override
-it for one invocation with `--context`; override its Cluster with `--cluster`.
-Use `-n` or `--namespace` for a Namespace or Project, and `-A` or
-`--all-namespaces` where supported.
+You can override the selected scope for one command:
 
 ```bash
-ksctl get workspaces --context prod-admin
-ksctl get clusters --context prod-admin
+ksctl get pods -n demo
 ksctl get pods -A --cluster member-1
-ksctl get deployments -n demo --cluster member-1
+ksctl describe deployment web -n demo --cluster member-1
 ```
 
-An Endpoint and bearer Token can also be supplied without creating a Context:
+### Inspect resources
+
+| Command | Purpose |
+| --- | --- |
+| `ksctl get TYPE [NAME]` | Display one or more resources. |
+| `ksctl describe TYPE [NAME_PREFIX]` | Display detailed state and related information. |
+| `ksctl logs (POD \| TYPE/NAME)` | Print or follow container logs. |
+| `ksctl top (pod \| node) [NAME]` | Display current CPU and memory usage. |
+
+Use `get` for lists, structured output, and scripts:
+
+```bash
+ksctl get deployments,pods -n demo --cluster member-1
+ksctl get pods -n demo -l app=web -o wide
+ksctl get pod web-0 -n demo -o yaml
+```
+
+Use `describe` for human-readable details and related information:
+
+```bash
+ksctl describe deployment web -n demo
+ksctl describe pod/web-0 -n demo --cluster member-1
+```
+
+Accepted singular, plural, short, versioned, and group-qualified resource names
+depend on server discovery. `describe` does not support structured `-o` output;
+use `get` when another output format is required.
+
+### Read container logs
+
+Read a Pod directly or let the command resolve a workload to its Pods:
+
+```bash
+ksctl logs pod/web-0 -n demo
+ksctl logs deployment/web -n demo --all-pods
+ksctl logs deployment/web -n demo --all-pods --follow
+```
+
+The command reads logs from the selected Cluster through the KubeSphere
+Endpoint. It does not search a logging extension or reconnect after a stream is
+interrupted. Logs can contain sensitive data, so protect terminal captures and
+redirected files.
+
+### View current resource usage
+
+`top` reads recent CPU and memory signals from
+`metrics.k8s.io/v1beta1`:
+
+```bash
+ksctl top pod -n demo --sort-by=cpu
+ksctl top pod web-0 -n demo --containers
+ksctl top node --cluster member-1
+```
+
+Metrics Server must be available in the selected Cluster. The values are
+current autoscaling signals, not historical monitoring data; ksctl does not
+fall back to a KubeSphere monitoring extension.
+
+## Manage tenants
+
+A Workspace groups tenant access to Namespaces and Clusters. `tenant get`
+reads these relationships from the KubeSphere tenant API rather than Kubernetes
+resource discovery.
+
+| Command | Purpose |
+| --- | --- |
+| `ksctl tenant get workspace [NAME]` | List accessible Workspaces or show one Workspace. |
+| `ksctl tenant get namespace` | List Namespaces, optionally filtered by Workspace. |
+| `ksctl tenant get cluster` | List Clusters, optionally filtered by Workspace. |
+
+List tenant resources and filter them by Workspace:
+
+```bash
+ksctl tenant get workspace
+ksctl tenant get workspace platform
+ksctl tenant get ns --workspace platform
+ksctl tenant get ns --workspace platform --cluster member-1
+ksctl tenant get cluster --workspace platform
+```
+
+Accepted names include `workspace`/`workspaces`,
+`namespace`/`namespaces`/`ns`, and `cluster`/`clusters`.
+
+`--workspace` filters Namespace and Cluster results. `--cluster` routes
+Namespace requests through a selected member Cluster, but it does not change
+Workspace or tenant Cluster requests. Output can be `table`, `json`, or
+`yaml`.
+
+## Manage extensions
+
+Extension resources are always managed on the KubeSphere host. A Context
+default Cluster is ignored, while explicitly passing the root `--cluster` or
+`--namespace` flag returns an error. Use extension placement flags to select
+member Clusters, or `diagnose --target-cluster` to inspect a member status.
+
+| Command | Purpose |
+| --- | --- |
+| `ksctl extension list` | List and filter available extensions. |
+| `ksctl extension show NAME` | Show extension or exact-version details. |
+| `ksctl extension versions NAME` | List available versions. |
+| `ksctl extension status [NAME]` | Show or watch installation status. |
+| `ksctl extension install NAME` | Install an extension. |
+| `ksctl extension upgrade NAME --version VERSION` | Upgrade to an exact version. |
+| `ksctl extension configure NAME` | Update configuration or placement. |
+| `ksctl extension uninstall NAME` | Remove an extension. |
+| `ksctl extension diagnose NAME` | Diagnose extension controller state. |
+
+### Discover extensions
+
+Inspect the catalog, available versions, and installation state:
+
+```bash
+ksctl extension list --installed
+ksctl extension list --category observability
+ksctl extension show logging
+ksctl extension versions logging
+```
+
+Use `-o table`, `-o wide`, `-o json`, or `-o yaml` where supported. JSON and
+YAML retain the complete server objects.
+
+### Manage the lifecycle
+
+Install uses the extension's recommended version when `--version` is omitted.
+Upgrade always requires an exact version:
+
+```bash
+ksctl extension install logging
+ksctl extension install logging --version 1.2.1 --wait
+ksctl extension upgrade logging --version 1.3.0 --wait
+ksctl extension configure logging --config ./logging-values.yaml
+ksctl extension uninstall logging --wait
+```
+
+Lifecycle requests are asynchronous by default and return after the API
+accepts the request. Add `--wait` to poll for completion. Uninstall deletes
+the InstallPlan without an interactive confirmation.
+
+Configuration input must be a non-empty YAML mapping. Use `--config FILE`, or
+`--config -` to read it from stdin.
+
+### Configure placement and diagnose
+
+Select member Clusters and add per-Cluster overrides:
+
+```bash
+ksctl extension install logging --clusters member-a,member-b
+ksctl extension configure logging --override member-a=./member-a.yaml
+ksctl extension diagnose logging --target-cluster member-a
+```
+
+`--all-clusters` resolves the currently eligible Cluster set and saves that
+snapshot; it is not a dynamic selector. Diagnosis checks controller state but
+does not retrieve logs, Secrets, or rendered Helm values.
+
+Use verbosity 7 or lower for extension commands. Higher REST debug verbosity
+can reveal extension configuration.
+
+## Other commands
+
+### Authenticate and select a Context
+
+| Command | Purpose |
+| --- | --- |
+| `ksctl auth login [ENDPOINT]` | Log in and select the saved Context. |
+| `ksctl auth whoami` | Verify credentials and show the server-side identity. |
+| `ksctl auth logout [CONTEXT]` | Remove cached login credentials. |
+| `ksctl config current-context` | Show the selected Context. |
+| `ksctl config use-context NAME` | Select another Context. |
+| `ksctl config view` | Show merged, redacted configuration. |
+
+Omitting required login values in a terminal starts the guided flow:
+
+```bash
+ksctl auth login
+```
+
+Fleet groups an Endpoint, TLS settings, and its Users. During login, the Fleet
+name defaults to the Endpoint host and the Context name defaults to
+`<fleet>-<username>`. The new Context becomes current.
+
+The password entered by the guided flow is not persisted. For non-interactive
+login, avoid exposing `--password` through shell history, logs, or process
+inspection. `config view` redacts credentials by default; do not share
+`config view --raw` output. Logout clears cached login credentials but does
+not delete the Context.
+
+### Override the connection
+
+Use an Endpoint and bearer Token without creating a Context:
 
 ```bash
 ksctl get workspaces \
@@ -181,504 +275,51 @@ ksctl get workspaces \
   --token "$KS_TOKEN"
 ```
 
-`--endpoint` and `KS_ENDPOINT` are explicit connection overrides. Either one
-must be paired with an explicit `--token` or `KS_TOKEN`; ksctl never combines
-an overridden Endpoint with credentials from the selected Context. Supplying
-only `KS_TOKEN` is valid when a Context supplies the Endpoint.
+An explicit `--endpoint` or `KS_ENDPOINT` must be paired with an explicit
+`--token` or `KS_TOKEN`. ksctl never combines an overridden Endpoint with
+credentials from the selected Context.
 
-## Manage extensions
+### Generate kubeconfig
 
-The extension workflow is available through both `ksctl extension` and
-`kubectl ks extension`:
-
-```text
-ksctl extension list [--category CATEGORY] [--installed] [-o table|wide|json|yaml]
-ksctl extension show NAME [--version VERSION] [-o table|wide|json|yaml]
-ksctl extension versions NAME [-o table|json|yaml]
-ksctl extension status [NAME] [--watch] [--wait-timeout 10m]
-ksctl extension install NAME [--version VERSION] [--all-clusters]
-ksctl extension upgrade NAME --version VERSION [configuration flags] [--wait]
-ksctl extension configure NAME [configuration flags] [--wait]
-ksctl extension uninstall NAME [--wait]
-ksctl extension diagnose NAME [--target-cluster CLUSTER] [--verbose]
-```
-
-Extension resources are always managed on the KubeSphere host. A Context's
-`defaultCluster` does not route these requests, and extension commands reject
-the root `--cluster` and `--namespace` flags. Use `--clusters` to define
-extension placement and `diagnose --target-cluster` to select a member status.
-Even for a selected member status, diagnosis reads the controller Job and Pods
-from the host.
-
-### Discover and inspect
-
-List the catalog, filter it, inspect one extension, or display its exact
-versions:
-
-```bash
-ksctl extension list
-ksctl extension list --category observability --installed
-ksctl extension list -o wide
-ksctl extension show logging
-ksctl extension show logging -o wide
-ksctl extension show logging --version 1.2.1
-ksctl extension versions logging
-ksctl extension status
-ksctl extension status logging
-ksctl extension status logging --watch --wait-timeout 10m
-```
-
-JSON and YAML preserve complete server objects, including fields unknown to
-this ksctl release. The default `list` table is concise (`NAME`, `CATEGORY`,
-`RECOMMENDED`, `INSTALLED`, and `STATE`); `list -o wide` additionally shows
-`PROVIDER` and `ENABLED`. The default `show` table similarly omits empty
-optional fields, while `show -o wide` retains its complete detailed field set,
-including observed `INSTALLED` and requested `TARGET` versions. `show NAME
---version VERSION` continues to show the selected exact-version details.
-`status --watch` requires a name and table output.
-
-### Install and upgrade versions
-
-Install defaults to the Extension's current `status.recommendedVersion` when
-`--version` is omitted; pass a non-empty `--version` to select a different
-exact, opaque version. Upgrade always requires an exact `--version`. ksctl
-never rewrites a `v` prefix. The
-KubeSphere controller requires the corresponding ExtensionVersion resource to
-be named exactly `<extension>-<version>`, and ksctl verifies that identity
-directly:
-
-```bash
-ksctl extension install logging
-ksctl extension install logging --version 1.2.1
-ksctl extension upgrade logging --version 1.3.0
-```
-
-Lifecycle commands are asynchronous by default. After the API accepts a
-request, they print one `requested` line and return. Add `--wait` to poll for
-completion; `--wait-timeout` defaults to 10 minutes and is valid only with
-`--wait`:
-
-```bash
-ksctl extension install logging --version 1.2.1 --wait
-ksctl extension upgrade logging --version 1.3.0 \
-  --wait --wait-timeout 20m
-```
-
-Before install or upgrade, ksctl verifies all required extension dependencies.
-It reports an unmet dependency and does not create dependency InstallPlans
-automatically.
-
-### Configuration and multicluster placement
-
-Read global configuration from a file or stdin:
-
-```bash
-ksctl extension install logging --version 1.2.1 \
-  --config ./logging-values.yaml
-
-generate-values | ksctl extension configure logging --config -
-```
-
-Place a multicluster extension explicitly and add repeatable per-Cluster
-overrides:
-
-```bash
-ksctl extension install logging --version 1.2.1 \
-  --clusters member-a,member-b \
-  --override member-a=./member-a.yaml \
-  --override member-b=./member-b.yaml
-```
-
-For a multicluster extension, `--all-clusters` selects the current eligible
-snapshot from host `Clusters`: every non-deleting Cluster with `KSCoreReady`
-true and no explicit `Schedulable=False` condition. ksctl writes that resolved
-list to the InstallPlan; it does not leave a dynamic all-cluster selector.
-The resolved snapshot includes the host Cluster when it satisfies the same
-eligibility conditions; the KubeSphere controller remains responsible for
-host handling.
-
-```bash
-ksctl extension install logging --all-clusters
-```
-
-Upgrade can change configuration and placement in the same guarded update:
-
-```bash
-ksctl extension upgrade logging --version 1.3.0 \
-  --config ./logging-v1.3.yaml \
-  --clusters member-a,member-c \
-  --override member-c=./member-c.yaml
-```
-
-Configure keeps the current exact version. Omitted fields are preserved;
-positive and clear flags for one field are mutually exclusive:
-
-```bash
-ksctl extension configure logging --config ./logging-values.yaml
-ksctl extension configure logging --remove-override member-b
-ksctl extension configure logging --clear-config
-ksctl extension configure logging --clear-cluster-scheduling
-```
-
-At most one `--config` or `--override` input may read stdin during one
-invocation. Configuration and overrides must be non-empty, single-document
-YAML mappings with no duplicate keys. Existing retained values are validated
-too. ksctl applies the same per-line trailing-whitespace normalization as the
-KubeSphere InstallPlan admission webhook. Cluster names must be DNS-1123
-subdomains.
-
-With `--wait`, placement replacement waits for new members and removal of old
-member agents. `--clear-cluster-scheduling --wait` likewise waits until all
-previous member statuses disappear. Dynamic selector-only placement cannot be
-tracked deterministically, so `--wait` requires replacing it with
-`--clusters` first.
-
-### Uninstall and diagnose
-
-Uninstall deletes the InstallPlan directly without an interactive
-confirmation. The default returns after deletion is accepted; `--wait` polls
-until the InstallPlan is gone:
-
-```bash
-ksctl extension uninstall logging
-ksctl extension uninstall logging --wait
-```
-
-Diagnosis prints ordered checks for the Extension, InstallPlan, exact version,
-dependencies, target Namespace, controller Job, Pods, member statuses, and
-timestamp consistency:
-
-```bash
-ksctl extension diagnose logging
-ksctl extension diagnose logging --target-cluster member-a
-ksctl extension diagnose logging --verbose
-```
-
-For a complete healthy diagnosis, default output is a one-line health summary.
-Otherwise it prints only `WARN` and `ERROR` rows in order followed by status
-counts. `--verbose` prints every completed check and the same summary. If a
-service error interrupts diagnosis, ksctl prints the completed checks and an
-`incomplete` marker before returning that error.
-
-Diagnosis never retrieves logs, Secrets, or rendered Helm values. When further
-inspection is useful, it prints a `kubectl logs` command for the user to run.
-Warnings do not fail diagnosis; definite `ERROR` checks produce a non-zero
-exit status after the check table is printed.
-
-Extension commands reject `--v=8` and higher because the underlying
-KubeSphere REST client's debug logging can expose InstallPlan configuration.
-Use `--v=7` or lower.
-
-## Configuration and credentials
-
-### Configuration file
-
-ksctl uses `~/.ksctl/config.yaml`, independently of kubeconfig. Set
-`KSCTL_CONFIG` to select another file.
-
-```yaml
-apiVersion: ksctl.kubesphere.io/v1alpha1
-kind: Config
-currentContext: prod-admin
-fleets:
-  prod:
-    host: https://prod.example.com
-    users:
-      admin:
-        username: admin
-        bearerTokenFile: /secure/path/prod.token
-contexts:
-  prod-admin:
-    fleet: prod
-    user: admin
-    defaultCluster: member-1
-```
-
-Users belong to a Fleet, so different Fleets may each contain a User named
-`admin`. When `username` is omitted, the User map key is used. A User may
-configure `bearerTokenFile`, `bearerToken`, or a plaintext `password`. A
-password written manually into this file remains plaintext even though
-`auth login` itself never persists passwords.
-
-New configuration directories use mode `0700`; new configuration files use
-mode `0600`.
-
-Configuration is decoded strictly. Unknown or duplicate fields, legacy
-root-level `clusters` or `users`, unsupported `apiVersion` values, and
-unsupported `kind` values are errors. Missing `apiVersion` and `kind` still
-default to the current values. ksctl also refuses to save a Config whose type
-metadata it does not support, preventing an older binary from silently
-discarding newer fields.
-
-### Context commands
-
-Inspect or select Context state with:
-
-```bash
-ksctl config current-context
-ksctl config use-context prod-admin
-ksctl config view
-```
-
-`config view` redacts passwords, bearer tokens, and TLS private key data. Use
-`config view --raw` only when unredacted values are required, and never copy
-raw output into logs, issue reports, or chat messages.
-
-### Credential resolution
-
-Credentials are selected in this order:
-
-```text
---token > KS_TOKEN > bearerTokenFile > bearerToken > token cache > password
-```
-
-- `--token` and `KS_TOKEN` bypass configured and cached credentials.
-- An explicit `--endpoint` or `KS_ENDPOINT` requires one of those explicit
-  Token sources and never falls through to Context credentials.
-- A configured Token File or Token is used directly and bypasses token cache
-  refresh and password login. Read errors, empty Token Files, and subsequent
-  API authorization failures do not fall through to another credential.
-- A cached Access Token is reused while valid. If expired, its Refresh Token is
-  used when possible and the refreshed response replaces the cache.
-- If no usable cache remains and the selected User has a Password, ksctl logs
-  in for the current command only and does not cache that response.
-- If no credential is usable, the command reports that login is required.
-
-`auth login` stores the complete KubeSphere OAuth response under
-`~/.ksctl/cache/tokens/<fleet>/<user>.json`. New cache directories use mode
-`0700`, and new cache files use mode `0600`. It writes the cache before the
-Config; if the Config write fails, ksctl restores the exact previous cache
-contents or removes the newly created entry. The success message is printed
-only after both writes complete.
-
-## Inspect resources
-
-ksctl resolves resource types from KubeSphere server discovery rather than a
-static local registry. Accepted names, API groups, versions, and whether a
-resource is namespaced therefore depend on the connected server.
-
-### Get resources
-
-`get` displays one object or a resource list. It uses the kubectl v0.36.2
-resource builder and printers, including multi-type requests:
-
-```bash
-ksctl get workspaces
-ksctl get workspace demo
-ksctl get deployments,pods -n demo
-ksctl get pod/web-0 -n demo
-```
-
-### Describe resources
-
-`describe` produces human-readable details and related Events. Kubernetes
-types use kubectl's built-in Describers; other discovered resources use its
-generic fallback.
-
-```bash
-ksctl describe workspace demo
-ksctl describe cluster member-1
-ksctl describe deployment web -n demo
-ksctl describe pod/web-0 -n demo --cluster member-1
-```
-
-`describe` accepts an exact name, a name prefix, or selectors as described by
-`ksctl describe --help`. It does not support structured `-o` output; use `get`
-for that.
-
-### Read container logs
-
-`logs` uses kubectl v0.36.2's Pod Logs behavior. It can read a Pod directly or
-resolve a workload to its Pods:
-
-```bash
-ksctl logs pod/web-0 -n demo
-ksctl logs deployment/web -n demo --all-pods
-ksctl logs deployment/web -n demo --all-pods --all-containers --prefix
-ksctl logs pod/web-0 -n demo -c app --previous
-ksctl logs pod/web-0 -n demo --tail=100 --since=1h
-ksctl logs pod/web-0 -n demo --follow
-```
-
-Logs are read from the selected Kubernetes Cluster through the KubeSphere
-Endpoint. The built-in command does not search a logging extension, retain
-history, reconnect a failed stream, or combine results from multiple Clusters.
-Application logs can contain credentials or other sensitive data; protect
-terminal capture and redirected files accordingly.
-
-### View current resource usage
-
-`top` reads the Kubernetes Metrics API. Metrics Server must expose
-`metrics.k8s.io/v1beta1` in the selected Cluster:
-
-```bash
-ksctl top pod -n demo
-ksctl top pod -A --sort-by=cpu
-ksctl top pod web-0 -n demo --containers
-ksctl top node
-ksctl top node worker-0 --show-capacity
-```
-
-`top pod` is namespaced and supports `-A`; `top node` is Cluster-scoped. The
-reported values are the recent signals used by Kubernetes autoscaling, not
-historical monitoring data. ksctl does not fall back to a KubeSphere
-monitoring extension.
-
-### Select scope
-
-```bash
-ksctl get pods -n demo
-ksctl get pods -A
-ksctl get pods -A --cluster member-1
-ksctl describe deployment web -n demo --cluster member-1
-ksctl logs deployment/web -n demo --all-pods --cluster member-1
-ksctl top pod -n demo --cluster member-1
-ksctl top node --cluster member-1
-```
-
-### Filter, sort, and watch
-
-The resource commands retain kubectl-compatible selectors and list behavior:
-
-```bash
-ksctl get pods -l app=web
-ksctl get pods --field-selector=status.phase=Running
-ksctl get pods --sort-by=.metadata.name
-ksctl get pods --watch
-```
-
-Run `ksctl get --help`, `ksctl describe --help`, `ksctl logs --help`, and
-`ksctl top --help` for the complete command-specific flags.
-
-### Select output
-
-`get` requests a server-provided table by default. Use `-o` to select another
-format:
-
-```bash
-ksctl get pods -o wide
-ksctl get pod web-0 -o yaml
-ksctl get deployments -o json
-ksctl get pod web-0 -o jsonpath='{.status.phase}'
-ksctl get pods -o custom-columns=NAME:.metadata.name
-```
-
-Supported formats are listed by `ksctl get --help` and come from the pinned
-kubectl implementation.
-
-### Get tenant resources
-
-`tenant get` reads KSE tenant resources directly from
-`/kapis/tenant.kubesphere.io/v1beta1`:
-
-```bash
-ksctl tenant get workspace
-ksctl tenant get workspace platform-regular
-ksctl tenant get ns
-ksctl tenant get ns --workspace platform-regular
-ksctl tenant get ns --workspace platform-regular --cluster member-1
-ksctl tenant get cluster
-ksctl tenant get cluster --workspace platform-regular
-```
-
-Accepted resource names are `workspace`/`workspaces`,
-`namespace`/`namespaces`/`ns`, and `cluster`/`clusters`. Workspace intentionally
-has no `ws` alias. The `--workspace WORKSPACE` flag is available only for
-Namespaces and Clusters and has no `-w` shorthand.
-
-Workspace requests use `workspacetemplates` and always remain Fleet-scoped:
-
-```text
-/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates
-/kapis/tenant.kubesphere.io/v1beta1/workspacetemplates/NAME
-```
-
-Cluster requests are also always Fleet-scoped. Namespace requests automatically
-use the resolved Cluster from an explicit `--cluster` or the selected Context's
-`defaultCluster`; when present, requests receive the
-`/clusters/CLUSTER` prefix. Consequently, `--cluster` does not alter Workspace
-or tenant Cluster requests.
-
-Without `-o`, `tenant get` prints kubectl-style tables. Workspace columns are
-`NAME`, `CLUSTERS`, `ADMINISTRATOR`, and `AGE`; Namespace columns are `NAME`,
-`STATUS`, and `AGE`; Cluster columns are `NAME`, `PROVIDER`, and `VERSION`.
-Use `-o json` or `-o yaml` to retain the complete KSE response envelope.
-
-## Generate kubeconfig
-
-Generate kubeconfig for the current logged-in User:
-
-```bash
-ksctl config generate kubeconfig
-```
-
-An explicit `--cluster` overrides the current Context's `defaultCluster`.
-Otherwise, the default is used. The server response is written unchanged to
-stdout and is never merged into `~/.kube/config`.
-
-Kubeconfig contains credentials. Use a restrictive umask before redirecting it
-to a file:
+Generate kubeconfig for the selected User and Cluster:
 
 ```bash
 umask 077
 ksctl config generate kubeconfig --cluster member-1 > member-1.kubeconfig
 ```
 
-Generation requires a selected Context because the User identity comes from
-that Context even when connection flags are supplied.
+The server response is written unchanged to stdout and is not merged into
+`~/.kube/config`. The output contains credentials, so store it with restrictive
+permissions.
 
-## Executable plugins
+### Call an API or use a plugin
 
-An executable whose name begins with `ksctl-` and is available on `PATH` can
-provide an external command. For example, `ksctl-foo` provides both forms:
-
-```bash
-ksctl foo [arguments and flags]
-kubectl ks foo [arguments and flags]
-```
-
-Nested words are joined with dashes. If both `ksctl-foo` and
-`ksctl-foo-bar` exist, `ksctl foo bar` selects the longest match. Dashes in a
-command word map to underscores in the executable name, so `ksctl foo-bar`
-can invoke `ksctl-foo_bar`.
-
-Plugin flags must follow the plugin name:
+Send an authenticated request to a server-relative KubeSphere API path:
 
 ```bash
-ksctl foo --context prod
+ksctl api /kapis/version
 ```
 
-Do not use `ksctl --context prod foo`; flags before an unknown plugin name are
-rejected. ksctl passes unmatched arguments and the inherited environment to
-the selected executable unchanged. Each plugin must parse its own flags and
-obtain any connection settings it needs.
+`api` defaults to GET. Supplying `--data` without `--method` changes the
+default to POST, and the response body is written unchanged. Run
+`ksctl api --help` before sending mutating requests.
 
-List and diagnose candidates with:
+`API_PATH` is sent unchanged. Neither `--cluster`, `--namespace`, nor a Context
+default Cluster adds scope automatically. To target a member Cluster, include
+`/clusters/CLUSTER/...` in `API_PATH`.
+
+An executable named `ksctl-foo` provides the external command `ksctl foo`:
 
 ```bash
 ksctl plugin list
-ksctl plugin list --name-only
+ksctl foo --context prod
 ```
 
-The listing reports non-executable files, PATH shadowing, and conflicts with
-built-in commands. It returns a non-zero status when no plugins are found,
-plugin directories cannot be read, or warnings are present. Built-in commands
-cannot be replaced or extended by plugins.
+Plugin flags must follow the plugin name. Plugins run with your user
+privileges and are not audited or sandboxed by ksctl; install and run only
+plugins you trust.
 
-Plugins are arbitrary programs that run with your user privileges. ksctl does
-not audit or sandbox them; install and run only plugins you trust.
-
-## Environment variables
-
-| Variable | Purpose |
-| --- | --- |
-| `KSCTL_CONFIG` | Select an alternate ksctl configuration file. |
-| `KS_ENDPOINT` | Supply the default KubeSphere API Endpoint. |
-| `KS_TOKEN` | Supply the default KubeSphere bearer Token. |
-
-Explicit command-line flags take precedence over their environment defaults.
-
-## Global flags
+## Global options and environment variables
 
 | Flag | Purpose |
 | --- | --- |
@@ -687,66 +328,76 @@ Explicit command-line flags take precedence over their environment defaults.
 | `--context NAME` | Use a named ksctl Context. |
 | `--cluster NAME` | Select a KubeSphere member Cluster. |
 | `-n, --namespace NAME` | Select a Kubernetes Namespace or KubeSphere Project. |
-| `--request-timeout DURATION` | Limit the duration of a single server request; `0` means no limit. |
+| `--request-timeout DURATION` | Limit one server request; `0` means no limit. |
 | `-v, --v LEVEL` | Set log verbosity. |
 
-Subcommands may add flags or, as with `auth login --context`, define a local
-flag with command-specific meaning.
+| Variable | Purpose |
+| --- | --- |
+| `KSCTL_CONFIG` | Select another ksctl configuration file. |
+| `KS_ENDPOINT` | Supply the default KubeSphere API Endpoint. |
+| `KS_TOKEN` | Supply the default KubeSphere bearer Token. |
+
+Explicit flags override environment variables, which override Context defaults
+where the setting supports them. Subcommands may define additional flags or
+give a flag a command-specific meaning.
 
 ## Common workflows
 
-Inspect KubeSphere resources:
+### Tenant workflow
+
+A tenant can discover assigned scope and then inspect workloads in a selected
+Namespace and Cluster:
 
 ```bash
-ksctl get workspaces
-ksctl describe workspace demo
-ksctl get clusters
-ksctl describe cluster member-1
+ksctl auth login
+ksctl auth whoami
 ksctl tenant get workspace
-ksctl tenant get ns --workspace demo --cluster member-1
+ksctl tenant get ns --workspace demo
 ksctl tenant get cluster --workspace demo
+ksctl get deployments,pods -n demo --cluster member-1
+ksctl logs deployment/web -n demo --all-pods --cluster member-1
+ksctl top pod -n demo --cluster member-1
 ```
 
-Inspect Kubernetes resources through a member Cluster:
+### Administrator workflow
+
+An administrator can confirm the active environment, inspect platform state,
+and manage an extension:
 
 ```bash
-ksctl get deployments,pods -n demo -l app=web -o wide --cluster member-1
-ksctl describe deployment web -n demo --cluster member-1
-```
-
-Switch environments:
-
-```bash
+ksctl auth login
+ksctl auth whoami
 ksctl config current-context
-ksctl config use-context staging-admin
-ksctl get workspaces
+ksctl config use-context prod-admin
+ksctl get pods -A --cluster member-1
+ksctl tenant get workspace
+ksctl extension list --installed
+ksctl extension install logging --version 1.2.1 --wait
+ksctl extension diagnose logging
+ksctl api /kapis/version
 ```
 
 ## Troubleshooting
 
-- Run `ksctl help` or `ksctl COMMAND --help` to confirm syntax and flags for
-  the installed version.
-- Run `ksctl config current-context` to confirm which Context is selected.
+- Run `ksctl help` or `ksctl COMMAND --help` to confirm syntax for the
+  installed release.
+- Run `ksctl config current-context` to confirm the selected Context.
 - Run `ksctl config view` to inspect redacted connection and scope settings.
-- Run `ksctl plugin list` to diagnose executable permissions, PATH shadowing,
-  and built-in command conflicts.
-- An unknown resource type usually means the connected server did not
-  advertise it through discovery; confirm the Endpoint, Context, Cluster, and
-  Namespace or Project.
-- A login-required error means no usable explicit, configured, or cached
-  credential was found for the selected connection.
+- An unknown resource type usually means the selected server or Cluster did
+  not advertise it through discovery.
+- A login-required error means no usable credential was found for the selected
+  connection.
+- Avoid `ksctl config view --raw` during routine troubleshooting because it can
+  reveal credentials and TLS private key data.
 
-### `Metrics API not available`
+### Metrics API not available
 
-`top` requires Metrics Server and a discoverable `metrics.k8s.io/v1beta1`
-APIService in the selected Cluster. Verify the Metrics Server deployment,
-APIService availability, and the selected `--cluster`.
+`top` requires Metrics Server and a discoverable
+`metrics.k8s.io/v1beta1` APIService in the selected Cluster. Verify the
+Metrics Server deployment, APIService availability, and `--cluster` value.
 
 ### Logs stop during `--follow`
 
-A followed log stream ends when the server closes it, the user cancels it, an
-unignored request error occurs, or an explicit nonzero `--request-timeout`
-expires. ksctl does not reconnect or resume the stream.
-
-Avoid `ksctl config view --raw` during routine troubleshooting because its
-output can contain credentials and TLS private key data.
+A followed log stream ends when the server closes it, the user cancels it, a
+request fails, or a nonzero `--request-timeout` expires. ksctl does not
+reconnect or resume the stream.
