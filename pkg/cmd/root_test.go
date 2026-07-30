@@ -588,7 +588,6 @@ func TestRootConnectionFlags(t *testing.T) {
 		"token",
 		"context",
 		"cluster",
-		"namespace",
 		"request-timeout",
 		"v",
 	} {
@@ -596,10 +595,43 @@ func TestRootConnectionFlags(t *testing.T) {
 			t.Errorf("persistent flag --%s is not registered", name)
 		}
 	}
-	for _, name := range []string{"insecure-skip-tls-verify", "no-interactive", "workspace"} {
+	for _, name := range []string{"insecure-skip-tls-verify", "namespace", "no-interactive", "workspace"} {
 		if cmd.PersistentFlags().Lookup(name) != nil {
 			t.Errorf("persistent flag --%s is registered", name)
 		}
+	}
+}
+
+func TestResourceCommandNamespaceFlags(t *testing.T) {
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	for _, path := range [][]string{
+		{"get"},
+		{"describe"},
+		{"logs"},
+		{"top", "pod"},
+	} {
+		command := root
+		for _, name := range path {
+			command = findSubcommand(command, name)
+			if command == nil {
+				t.Fatalf("command %q is not registered", strings.Join(path, " "))
+			}
+		}
+		flag := command.LocalNonPersistentFlags().Lookup("namespace")
+		if flag == nil {
+			t.Errorf("%s does not define --namespace", strings.Join(path, " "))
+		} else if flag.Shorthand != "n" {
+			t.Errorf(
+				"%s --namespace shorthand = %q, want n",
+				strings.Join(path, " "),
+				flag.Shorthand,
+			)
+		}
+	}
+
+	topNode := findSubcommand(findSubcommand(root, "top"), "node")
+	if topNode.LocalNonPersistentFlags().Lookup("namespace") != nil {
+		t.Error("top node defines --namespace")
 	}
 }
 

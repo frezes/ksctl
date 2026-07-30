@@ -28,7 +28,6 @@ func executeExtensionCommand(
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().String("cluster", "", "")
-	root.PersistentFlags().StringP("namespace", "n", "", "")
 	root.SetOut(streams.Out)
 	root.SetErr(streams.ErrOut)
 	root.SetIn(streams.In)

@@ -221,11 +221,12 @@ unknown server fields for forward compatibility.
 
 All extension catalog and InstallPlan requests use the host KubeSphere
 Endpoint. A dedicated connection getter ignores a Context's `defaultCluster`;
-explicit root `--cluster` and `--namespace` flags are rejected before
-connection resolution. Multicluster placement is expressed in the InstallPlan
-with `--clusters` and overrides. `diagnose --target-cluster` selects a member's
-status from the host InstallPlan, but the referenced Namespace, Job, and Pods
-are still read through host `/api/v1` and `/apis/batch/v1` paths.
+the global `--cluster` flag is rejected before connection resolution.
+Extension commands do not define the resource-command-local `--namespace`
+flag. Multicluster placement is expressed in the InstallPlan with `--clusters`
+and overrides. `diagnose --target-cluster` selects a member's status from the
+host InstallPlan, but the referenced Namespace, Job, and Pods are still read
+through host `/api/v1` and `/apis/batch/v1` paths.
 
 Install creates an enabled InstallPlan with `upgradeStrategy: Manual`. Upgrade
 and configure send minimal JSON Merge Patches guarded by the current

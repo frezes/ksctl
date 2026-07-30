@@ -147,7 +147,10 @@ ksctl tenant get cluster --workspace platform
 
 ## 扩展组件管理
 
-扩展组件资源始终在 KubeSphere host Cluster 上管理。Context 的默认 Cluster 会被忽略，而显式传递根级 `--cluster` 或 `--namespace` 参数会返回错误。请使用扩展组件部署位置参数选择成员 Cluster，或使用 `diagnose --target-cluster` 查看成员状态。
+扩展组件资源始终在 KubeSphere host Cluster 上管理。Context 的默认 Cluster
+会被忽略，而显式传递全局 `--cluster` 参数会返回错误。扩展组件命令不定义资源
+命令本地的 `--namespace` 参数。请使用扩展组件部署位置参数选择成员 Cluster，
+或使用 `diagnose --target-cluster` 查看成员状态。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -279,9 +282,12 @@ ksctl foo --context prod
 | `--token TOKEN` | 覆盖 KubeSphere 持有者令牌。 |
 | `--context NAME` | 使用具名 ksctl Context。 |
 | `--cluster NAME` | 选择 KubeSphere 成员 Cluster。 |
-| `-n, --namespace NAME` | 选择 Kubernetes Namespace 或 KubeSphere 项目。 |
 | `--request-timeout DURATION` | 限制单个服务器请求；`0` 表示不限制。 |
 | `-v, --v LEVEL` | 设置日志详细级别。 |
+
+Kubernetes 资源命令在本地定义 `-n, --namespace NAME`。请将其放在 `get`、
+`describe`、`logs` 或 `top pod` 之后，以选择 Kubernetes Namespace 或
+KubeSphere 项目；它不是全局连接参数。
 
 | 环境变量 | 用途 |
 | --- | --- |
