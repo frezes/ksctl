@@ -159,6 +159,30 @@ func TestKubeRegistersCompleteOperationCommandSet(t *testing.T) {
 	}
 }
 
+func TestKubeRejectsExcludedCommandPaths(t *testing.T) {
+	for _, name := range []string{
+		"alpha",
+		"completion",
+		"config",
+		"kuberc",
+		"options",
+		"plugin",
+		"version",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := NewRootCommand(
+				IOStreams{Out: new(bytes.Buffer), ErrOut: new(bytes.Buffer)},
+				VersionInfo{Version: "dev"},
+			)
+			root.SetArgs([]string{"kube", name, "--help"})
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), `unknown command "`+name+`"`) {
+				t.Fatalf("Execute() error = %v, want unknown command %q", err, name)
+			}
+		})
+	}
+}
+
 func TestKubePreservesRepresentativeKubectlSubcommandsAndFlags(t *testing.T) {
 	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
 	kube := findSubcommand(root, "kube")
@@ -218,6 +242,46 @@ func TestKubeHelpGroupsOperationCommands(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("kube help missing %q:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestKubeHelpOmitsExcludedOptionsHintAndUsesEntrypointDisplayName(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		newRoot func() *cobra.Command
+		want    string
+	}{
+		{
+			name: "standalone",
+			newRoot: func() *cobra.Command {
+				return NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+			},
+			want: `Use "ksctl kube <command> --help"`,
+		},
+		{
+			name: "alternate entrypoint",
+			newRoot: func() *cobra.Command {
+				return newTestEntrypointCommand(t, IOStreams{}, VersionInfo{Version: "dev"})
+			},
+			want: `Use "fixture entrypoint kube <command> --help"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			out := new(bytes.Buffer)
+			root := test.newRoot()
+			root.SetOut(out)
+			root.SetErr(out)
+			root.SetArgs([]string{"kube", "--help"})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if !strings.Contains(out.String(), test.want) {
+				t.Fatalf("help = %q, want %q", out.String(), test.want)
+			}
+			if strings.Contains(out.String(), "kube options") {
+				t.Fatalf("help advertises excluded options command: %s", out.String())
+			}
+		})
 	}
 }
 

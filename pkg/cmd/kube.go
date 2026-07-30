@@ -1,6 +1,10 @@
 package cmd
 
 import (
+	"io"
+	"strconv"
+	"strings"
+
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/kubectl/pkg/cmd/annotate"
@@ -52,10 +56,18 @@ func newKubeCommand(
 	command := &cobra.Command{
 		Use:   "kube",
 		Short: "Manage Kubernetes resources through KubeSphere",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return command.Help()
 		},
 	}
+	command.Flags().VarP(
+		&deferredHelpValue{},
+		"help",
+		"h",
+		"help for kube",
+	)
+	command.Flags().Lookup("help").NoOptDefVal = "true"
 	command.PersistentFlags().StringVarP(
 		namespace,
 		"namespace",
@@ -157,6 +169,57 @@ func newKubeCommand(
 	}
 	groups.Add(command)
 	templates.ActsAsRootCommand(command, nil, groups...)
+	adaptNestedKubectlHelp(command, kubeDisplayName)
 	rewriteKubectlExamples(command, kubeDisplayName)
 	return command
+}
+
+type deferredHelpValue struct{}
+
+// deferredHelpValue keeps Cobra from handling --help before validating
+// positional arguments. A kubectl-style command embedded below another Cobra
+// root would otherwise treat an excluded command name as an argument and
+// successfully print the kube parent help.
+func (*deferredHelpValue) Set(value string) error {
+	_, err := strconv.ParseBool(value)
+	return err
+}
+
+func (*deferredHelpValue) String() string {
+	return "false"
+}
+
+func (*deferredHelpValue) Type() string {
+	return "bool"
+}
+
+func (*deferredHelpValue) IsBoolFlag() bool {
+	return true
+}
+
+// adaptNestedKubectlHelp removes assumptions made by kubectl's root-only help
+// template when the same operation tree is mounted below ksctl kube.
+func adaptNestedKubectlHelp(command *cobra.Command, displayName string) {
+	upstreamHelp := command.HelpFunc()
+	command.SetHelpFunc(func(current *cobra.Command, args []string) {
+		destination := current.OutOrStdout()
+		var output strings.Builder
+		current.SetOut(&output)
+		upstreamHelp(current, args)
+		current.SetOut(destination)
+
+		help := strings.ReplaceAll(
+			output.String(),
+			`Use "kube `,
+			`Use "`+displayName+` `,
+		)
+		var filtered strings.Builder
+		for _, line := range strings.SplitAfter(help, "\n") {
+			if strings.Contains(line, "for a list of global command-line options") {
+				continue
+			}
+			filtered.WriteString(line)
+		}
+		_, _ = io.WriteString(destination, filtered.String())
+	})
 }
