@@ -1,22 +1,24 @@
 # KubeSphere CLI (ksctl)
 
 `ksctl` is a command-line client for KubeSphere 4.x and the Kubernetes
-resources exposed through KubeSphere. It provides familiar kubectl-style
-inspection commands alongside KubeSphere authentication, tenant, Extension,
+resources exposed through KubeSphere. It provides kubectl-compatible
+Kubernetes operations alongside KubeSphere authentication, tenant, Extension,
 and API workflows.
 
 ## Highlights
 
-- Inspect Kubernetes and discovered KubeSphere resources with familiar
-  kubectl-style commands.
+- Inspect Kubernetes and discovered KubeSphere resources concisely with the
+  top-level `get` command.
+- Use `kube` for the complete kubectl-compatible Kubernetes operation command
+  set, routed through KubeSphere authentication and member-Cluster selection.
 - Authenticate, switch saved Contexts, and target host or member Clusters.
 - Explore tenant Workspaces, Namespaces, and Clusters.
 - Discover, install, configure, diagnose, and remove KubeSphere Extensions.
 - Send authenticated raw API requests and extend the CLI with `ksctl-*`
   executable plugins.
 
-The built-in `get`, `describe`, `logs`, `top`, and `tenant get` workflows are
-read-only. Extension lifecycle commands can change KubeSphere state.
+Top-level `get` and `tenant get` are read-only. Commands under `kube` may
+change the selected Kubernetes Cluster.
 
 ## Install a release
 
@@ -55,17 +57,12 @@ available to it:
 
 ```bash
 ksctl auth login
-ksctl auth whoami
-ksctl config current-context
-
 ksctl get pods -A
-ksctl describe deployment web -n demo
-ksctl logs deployment/web -n demo --all-pods
-ksctl top pod -n demo
-
+ksctl kube describe deployment web -n demo
+ksctl kube logs deployment/web -n demo --all-pods
+ksctl kube top pod -n demo
+ksctl kube apply -f app.yaml --cluster member-1
 ksctl tenant get workspace
-ksctl extension list
-ksctl api /kapis/version
 ```
 
 Interactive login prompts for missing connection and account values, reads the
@@ -80,9 +77,8 @@ the selected Cluster.
 | --- | --- |
 | `auth` | Log in, inspect the current identity, and log out. |
 | `config` | Inspect and select Contexts or generate kubeconfig. |
-| `get`, `describe` | Inspect Kubernetes and discovered KubeSphere resources. |
-| `logs` | Read Pod or workload container logs. |
-| `top` | View current Pod or Node CPU and memory usage. |
+| `get` | Read Kubernetes and discovered KubeSphere resources. |
+| `kube` | Run Kubernetes read, mutation, rollout, debugging, streaming, and cluster-management operations. |
 | `tenant` | Inspect tenant Workspaces, Namespaces, and Clusters. |
 | `extension` | Discover and manage KubeSphere Extensions. |
 | `api` | Send an authenticated request to a KubeSphere API path. |
@@ -91,6 +87,7 @@ the selected Cluster.
 | `version` | Print client and server version information. |
 
 Run `ksctl COMMAND --help` for the complete reference for an installed release.
+The release companion renders the same command tree as `unictl ks kube ...`.
 See the [CLI guide](docs/cli.md) for command workflows, flags, and
 troubleshooting.
 
@@ -105,8 +102,9 @@ troubleshooting.
 
 Use the global `--context` and, where supported, `--cluster` flags to override
 the saved scope for one command. Use `--endpoint` together with `--token` for a
-direct connection without a saved Context. Kubernetes resource commands also
-accept the command-local `--namespace` flag.
+direct connection without a saved Context. Top-level `get` accepts a local
+`--namespace` flag; `kube` provides persistent `--namespace` and
+`--request-timeout` flags to all of its operations.
 
 ## Documentation
 

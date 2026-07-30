@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add the `kube` command suite with kubectl-compatible Kubernetes reads,
+  mutations, rollouts, debugging, streaming, and Cluster management through
+  KubeSphere authentication and `--cluster` routing.
+
+### Changed
+
+- **Breaking:** Move `describe`, `logs`, and `top` from the root to
+  `kube describe`, `kube logs`, and `kube top`; remove the former top-level
+  paths.
+- **Breaking:** Move `--request-timeout` from the ksctl root to the `kube`
+  command group.
+
 ## [0.2.0] - 2026-07-30
 
 ### Added
