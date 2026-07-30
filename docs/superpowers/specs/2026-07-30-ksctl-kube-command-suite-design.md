@@ -8,10 +8,11 @@ Add a `kube` command group that exposes kubectl v0.36.2's Kubernetes operation
 commands through ksctl's KubeSphere authentication, Context selection, and
 member-Cluster routing.
 
-The existing top-level `get` command remains unchanged for concise resource
-inspection. `describe`, `logs`, and `top` move under `kube` and are removed
-from the root immediately. `kube get` provides the same resource behavior as
-the top-level `get`.
+The existing top-level `get` command remains available for concise resource
+inspection. Apart from the separately approved removal of the root
+`--request-timeout` flag, its resource behavior does not change. `describe`,
+`logs`, and `top` move under `kube` and are removed from the root immediately.
+`kube get` provides the same resource behavior as the top-level `get`.
 
 The shared command builder exposes the resulting tree through both supported
 entry points:
@@ -33,6 +34,8 @@ There is no `kubectl ks` entry point.
   KubeSphere Endpoint, credential, and optional Cluster.
 - Add `--cluster` as the deliberate ksctl extension to the familiar kubectl
   command behavior.
+- Scope `--request-timeout` to the `kube` command group instead of exposing it
+  at the ksctl root.
 - Preserve the current top-level `get` command and add equivalent
   `ksctl kube get` behavior.
 - Move `describe`, `logs`, and `top` under `kube` without compatibility
@@ -156,7 +159,7 @@ Create a focused `pkg/cmd/kube.go` command assembler. It accepts:
 - the active entry point display name;
 - the shared kubectl `cmdutil.Factory`;
 - the active generic IOStreams; and
-- the pointer used by ksctl for Namespace selection.
+- the pointers used by ksctl for Namespace and request-timeout selection.
 
 The assembler constructs a `kube` parent and adds each upstream operation
 through its exported `NewCmd...` constructor. It does not call
@@ -181,10 +184,11 @@ Top-level `get` and `kube get` are separate Cobra command instances created
 from the same upstream constructor. Both delegate their resource parsing,
 discovery, mapping, selection, watching, and printing behavior to kubectl.
 
-The `kube` parent defines persistent `--namespace` and `-n` flags bound to the
-existing Namespace option. Its children inherit that flag. Top-level `get`
-retains its command-local Namespace flag so its current syntax and scope do
-not change.
+The `kube` parent defines persistent `--namespace`/`-n` and
+`--request-timeout` flags bound to the existing connection options. Its
+children inherit those flags. Top-level `get` retains its command-local
+Namespace flag so its current syntax and scope do not change, but it no
+longer exposes `--request-timeout`.
 
 Upstream examples are rewritten recursively from `kubectl ...` to the active
 display path:
@@ -205,8 +209,12 @@ The root retains ksctl's existing connection flags:
 - `--token`
 - `--context`
 - `--cluster`
-- `--request-timeout`
 - `--v`
+
+`--request-timeout` moves from the root to the `kube` parent's persistent
+flags. It limits one Kubernetes server request for any remote `kube` child,
+and `0` retains the current unlimited/default behavior. Top-level KubeSphere
+commands and top-level `get` no longer accept this flag.
 
 For `kube` commands, `--context` selects a ksctl Context rather than a
 kubeconfig Context. An explicit `--cluster` overrides the selected Context's
@@ -223,7 +231,7 @@ example:
 
 ```text
 ksctl kube get pods --cluster member-1
-ksctl kube apply -f app.yaml --cluster member-1
+ksctl kube apply -f app.yaml --cluster member-1 --request-timeout 30s
 ksctl kube exec -it pod/web --cluster member-1 -- sh
 ```
 
@@ -338,7 +346,9 @@ Tests prove that:
 - excluded self-management commands are absent;
 - `kube alpha` is absent while the pinned upstream command has no children;
 - `kube get` and root `get` expose representative get flags;
-- `kube --namespace` is inherited by namespaced children; and
+- the root does not expose `--request-timeout`;
+- `kube --namespace` is inherited by namespaced children;
+- `kube --request-timeout` is inherited by remote children; and
 - root and nested help contain the active `ksctl` or `unictl ks` display path,
   not `kubectl ks`.
 
@@ -394,6 +404,7 @@ The documentation:
 - changes describe, logs, and top examples to `ksctl kube ...`;
 - documents the complete operation command categories;
 - explains `--cluster` as the ksctl extension to kubectl behavior;
+- documents `--request-timeout` only in the `kube` scope;
 - distinguishes `ksctl` from the `unictl ks` release companion;
 - removes stale claims that the complete generic resource surface is
   read-only; and
