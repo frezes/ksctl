@@ -7,18 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-30
+
 ### Added
 
 - Add host-scoped `extension` discovery, exact-version lifecycle management,
   configuration, multicluster placement, waiting, status, and diagnosis.
-- Revoke cached Access Tokens through the KubeSphere logout endpoint on a
-  best-effort basis before clearing local login state.
 - Add `auth whoami` to verify the selected KubeSphere credential and display
   the server-side User and global role.
 - Add kubectl-compatible `ksctl-*` executable plugins, including longest-name
   dispatch and `plugin list` diagnostics.
 - Add `tenant get` commands for KSE Workspaces, Namespaces, and Clusters with
   Workspace and member-Cluster routing plus kubectl-style table output.
+- Add kubeconfig generation for the selected KubeSphere Context and Cluster.
+- Add kubectl-compatible `logs` and resource-metrics `top` commands.
+- Add authenticated raw KubeSphere API requests through `ksctl api`.
+- Add the release-only `unictl-ks` companion entrypoint.
+
+### Changed
+
+- Scope `--namespace` to Kubernetes resource commands while preserving
+  kubeconfig Namespace defaults.
+
+### Security
+
+- Revoke cached Access Tokens through the KubeSphere logout endpoint on a
+  best-effort basis before clearing local login state.
+- Bind explicit endpoints to explicit tokens and harden configuration and TLS
+  boundaries.
 
 ## [0.1.0] - 2026-07-17
 
@@ -41,4 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove the non-functional `--workspace` flag.
 - Keep Go module metadata tidy and reproducible.
 
+[Unreleased]: https://github.com/frezes/ksctl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/frezes/ksctl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/frezes/ksctl/releases/tag/v0.1.0
