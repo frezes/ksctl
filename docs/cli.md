@@ -5,12 +5,13 @@
 ## Introduction
 
 `ksctl` is a command-line client for KubeSphere 4.x. It connects to a
-KubeSphere Endpoint and lets you inspect Kubernetes resources exposed through
-KubeSphere, inspect tenant resources, and manage KubeSphere extensions.
+KubeSphere Endpoint to inspect resources and manage KubeSphere extensions.
+The kubectl-compatible resource commands support cross-cluster inspection
+through `--cluster`. Tenant commands show how resources accessible to the
+current tenant are distributed across Workspaces, Namespaces, and Clusters.
 
-The generic resource commands (`get`, `describe`, `logs`, and `top`) and tenant
-commands are read-only. Extension lifecycle commands such as `install`,
-`configure`, and `uninstall` change KubeSphere state.
+These inspection commands are read-only. Extension lifecycle commands such as
+`install`, `configure`, and `uninstall` change KubeSphere state.
 
 Before you begin, you need:
 
@@ -43,30 +44,22 @@ ksctl COMMAND --help
 | Tenant management | Inspect Workspaces and their Namespaces and Clusters. | `tenant` | Available |
 | Extension management | Discover, install, configure, diagnose, and remove extensions. | `extension` | Available |
 | Application management | Manage KubeSphere applications. | — | Not yet available |
-| Other | Authenticate, select Contexts, call APIs, generate kubeconfig, and use plugins. | `auth`, `config`, `api`, `plugin` | Available |
+| Other | Authenticate, call APIs, and use plugins. | `auth`, `config`, `api`, `plugin` | Available |
 
 ## Manage Kubernetes resources
 
-The resource commands use kubectl-compatible discovery, selectors, printers,
-and workload log behavior. Resource types and their scope come from the
-connected server rather than a static registry in ksctl.
+Resource commands follow kubectl conventions for discovery, selectors, output,
+and logs. This guide assumes familiarity with kubectl and highlights only
+ksctl-specific scope selection.
 
 ### Select the resource scope
 
 | Concept | Meaning |
 | --- | --- |
-| Context | Selects a Fleet, User, and optional default Cluster. |
-| Cluster | Selects the Kubernetes Cluster for a request; override it with `--cluster`. |
-| Namespace | Selects a Kubernetes Namespace or KubeSphere Project with `-n` or `--namespace`. |
-| All Namespaces | Uses `-A` or `--all-namespaces` where the command supports it. |
-
-You can override the selected scope for one command:
-
-```bash
-ksctl get pods -n demo
-ksctl get pods -A --cluster member-1
-ksctl describe deployment web -n demo --cluster member-1
-```
+| Context | Selects the KubeSphere connection and identity. |
+| Cluster | Selects the target Cluster; use `--cluster` for a single command. |
+| Namespace | Selects a Kubernetes Namespace or KubeSphere Project. |
+| Workspace | Represents the tenant scope used to inspect accessible Namespaces and Clusters. |
 
 ### Inspect resources
 
@@ -74,7 +67,7 @@ ksctl describe deployment web -n demo --cluster member-1
 | --- | --- |
 | `ksctl get TYPE [NAME]` | Display one or more resources. |
 | `ksctl describe TYPE [NAME_PREFIX]` | Display detailed state and related information. |
-| `ksctl logs (POD \| TYPE/NAME)` | Print or follow container logs. |
+| `ksctl logs (POD \| TYPE/NAME)` | Print container logs. |
 | `ksctl top (pod \| node) [NAME]` | Display current CPU and memory usage. |
 
 Use `get` for lists, structured output, and scripts:
@@ -103,13 +96,11 @@ Read a Pod directly or let the command resolve a workload to its Pods:
 ```bash
 ksctl logs pod/web-0 -n demo
 ksctl logs deployment/web -n demo --all-pods
-ksctl logs deployment/web -n demo --all-pods --follow
 ```
 
 The command reads logs from the selected Cluster through the KubeSphere
-Endpoint. It does not search a logging extension or reconnect after a stream is
-interrupted. Logs can contain sensitive data, so protect terminal captures and
-redirected files.
+Endpoint. It does not search a logging extension. Logs can contain sensitive
+data, so protect terminal captures and redirected files.
 
 ### View current resource usage
 
@@ -390,9 +381,3 @@ ksctl api /kapis/version
 `top` requires Metrics Server and a discoverable
 `metrics.k8s.io/v1beta1` APIService in the selected Cluster. Verify the
 Metrics Server deployment, APIService availability, and `--cluster` value.
-
-### Logs stop during `--follow`
-
-A followed log stream ends when the server closes it, the user cancels it, a
-request fails, or a nonzero `--request-timeout` expires. ksctl does not
-reconnect or resume the stream.
