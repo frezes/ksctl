@@ -67,10 +67,10 @@ password without echo, and selects the new Context for later commands.
 - [CLI guide (English)](docs/cli.md) — commands, scope, workflows, and
   troubleshooting.
 - [CLI 指南（简体中文）](docs/cli_zh.md) — ksctl 命令、作用域、工作流和故障排查。
-- [Design (English)](docs/design.md) — architecture, client boundaries, routing,
-  persistence, security properties, and compatibility.
-- [设计文档（简体中文）](docs/design_zh.md) — ksctl 架构、客户端边界、路由、
-  持久化、安全属性和兼容性。
+- [Design (English)](docs/design.md) — core design, cross-Cluster access,
+  tenant and Extension flows, raw API requests, and authentication.
+- [设计文档（简体中文）](docs/design_zh.md) — 核心设计、跨集群访问、租户与扩展
+  组件流程、原始 API 请求和认证。
 
 ## Development
 
