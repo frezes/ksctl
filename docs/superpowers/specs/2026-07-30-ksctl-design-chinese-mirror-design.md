@@ -1,164 +1,227 @@
-# ksctl Design Document Chinese Mirror Design
+# ksctl Developer Design Documentation Design
 
 ## Goal
 
-Bring the maintained architecture reference back in sync with the current
-command surface and add a complete Simplified Chinese mirror without creating
-a second information architecture.
+Replace the implementation-heavy architecture reference with a concise
+developer design document that explains ksctl's essential responsibilities,
+scope rules, request flows, and safety boundaries. Maintain a complete
+Simplified Chinese mirror of the English source.
 
-## Scope
+## Audience and Content Level
 
-This change will:
+The maintained design documents are for developers who need to understand why
+ksctl behaves as it does and where each responsibility belongs. They are not
+source-code indexes, API references, command manuals, or test inventories.
 
-- update `docs/design.md` where its architecture description differs from the
-  current implementation;
-- add `docs/design_zh.md` as a complete structural mirror of
-  `docs/design.md`;
-- add a language switcher near the title of both design documents; and
-- update the `README.md` documentation section with separate English and
-  Simplified Chinese design links.
+Both documents will:
 
-The implementation review will use the current source and tests as the source
-of truth. The known content gap is the root-level `api` command, which is
-registered by the current command tree but is absent from the maintained
-architecture reference.
+- explain concepts and data flow in prose;
+- retain only the command names, domain objects, and routing semantics needed
+  to make a design boundary precise;
+- prefer responsibility and behavior over implementation mechanism; and
+- link to the language-matched CLI guide for syntax and workflows.
 
-This change will not:
+Both documents will remove:
 
-- reorganize the design document around a new information architecture;
-- change CLI behavior, Go code, dependencies, build configuration, or release
-  packaging;
-- translate historical specifications or plans under `docs/superpowers/`; or
-- introduce architecture claims that are not supported by the current source
-  or tests.
+- fenced code blocks and text diagrams;
+- package and source-file paths;
+- Go interfaces, constructors, adapters, private types, and method names;
+- configuration field trees and exact test coverage lists;
+- detailed request-path examples that are not required to understand scope;
+  and
+- historical implementation narrative that does not affect the current
+  design.
 
-## English Design Updates
+## Information Architecture
 
-The English document remains the canonical architecture reference. Its
-existing goals, non-goals, command pipeline, client boundaries, extension
-management, configuration, authentication, routing, kubeconfig, plugin,
-security, compatibility, and validation sections remain in their current
-order unless a small local adjustment is required for accuracy.
+The English and Chinese documents use the same compact hierarchy:
 
-The update will:
+1. **Goals and boundaries**
+2. **Architecture overview**
+3. **Core design**
+   - Cross-Cluster resource access
+   - Tenant pipeline
+   - Extension management
+   - Raw API requests
+   - Authentication and configuration
+4. **Security and compatibility**
 
-1. add the English/Chinese language switcher below the H1;
-2. include `api` in the list of ksctl-owned root commands;
-3. refine the read-only boundary so it applies to the kubectl-style generic
-   resource commands rather than implying that every built-in command is
-   read-only;
-4. distinguish the purpose-built Extension lifecycle workflow from the raw
-   `api` escape hatch, which may issue mutating requests under the user's
-   authority;
-5. add a focused section that explains the raw KubeSphere API request path;
-6. record that `api` uses the selected KubeSphere connection and credential
-   resolution but does not automatically apply selected Cluster scope;
-7. explain that callers provide a server-relative path, including an explicit
-   `/clusters/<cluster>` prefix when required;
-8. describe byte-preserving response output and the behavior for HTTP error
-   responses; and
-9. add the raw API command's relevant disclosure and trust boundary to the
-   existing security and validation descriptions.
+The five capability-specific topics are H3 subsections under one H2
+`Core design` section. This keeps the document readable as one system design
+instead of presenting each capability as an independent implementation.
 
-Any other correction discovered during source comparison must be narrowly
-scoped to a demonstrable mismatch. Editorial rewriting that does not improve
-accuracy, navigation, or bilingual consistency is out of scope.
+## Section Responsibilities
 
-## Chinese Mirroring Contract
+### Goals and boundaries
 
-`docs/design_zh.md` will preserve the English document's:
+This section explains:
 
-- heading hierarchy and section order;
-- paragraphs, lists, tables, and numbered-step order;
-- architecture diagrams and text pipelines;
-- commands, flags, environment variables, package names, types, field names,
-  API paths, versions, file paths, and configuration keys;
-- links to maintained repository documents; and
-- technical constraints, warnings, and security strength.
+- ksctl is one CLI for KubeSphere and Kubernetes resource inspection;
+- the kubectl-backed resource surface is read-only;
+- Extension lifecycle commands are purpose-built, controlled write workflows;
+- `api` is a raw authenticated escape hatch whose requests may mutate server
+  state; and
+- plugins run outside the built-in safety model.
 
-Only prose, explanatory headings, list labels, and link labels are translated.
-Code fences retain the same content and order. The Chinese copy should be
-natural and concise rather than mechanically word-for-word, but it must not
-omit qualifications or add behavior that is absent from the English source.
+Non-goals are limited to the boundaries developers need when extending the
+system: no generic typed mutation surface, no kubeconfig persistence model, no
+cross-Cluster aggregation, no plugin sandbox, and no KubeSphere 3.x support.
 
-Use established project terminology consistently:
+### Architecture overview
 
-| English | Simplified Chinese |
-| --- | --- |
-| Context | Context |
-| Fleet | Fleet |
-| User | User |
-| Workspace | Workspace |
-| Cluster | Cluster |
-| Namespace | Namespace |
-| Extension | 扩展组件 |
-| Endpoint | API 端点 |
-| Token | 令牌 |
-| discovery | 发现 |
-| RESTMapper | RESTMapper |
-| kubeconfig | kubeconfig |
+This section describes three conceptual layers without naming source packages
+or interfaces:
 
-Command names, flags, values, identifiers, and paths are never translated.
+1. the command layer captures user intent and explicit scope;
+2. connection and authentication resolution produce one effective server,
+   identity, and Cluster selection; and
+3. KubeSphere serves native APIs or proxies Kubernetes requests to the selected
+   Cluster.
+
+It also explains that command construction is independent of proxy topology
+and that each command invocation resolves and reuses one effective connection.
+
+### Core design: Cross-Cluster resource access
+
+This subsection explains:
+
+- Context provides the default Fleet, User, and optional Cluster;
+- explicit scope overrides Context defaults for one invocation;
+- Kubernetes resource discovery, reads, logs, and metrics use the same selected
+  Cluster route;
+- namespace selection narrows namespaced requests but does not select a
+  Cluster;
+- compatibility discovery may recover server capabilities when aggregate
+  discovery is incomplete; and
+- resource commands query one Cluster and never aggregate Fleet members.
+
+The explanation stays conceptual. It does not show request paths, client
+interfaces, dependency versions, or kubectl constructor details.
+
+### Core design: Tenant pipeline
+
+This subsection distinguishes tenant scope from generic Kubernetes discovery:
+
+- Workspace and tenant Cluster reads are Fleet-scoped;
+- Namespace reads use the selected Cluster;
+- an optional Workspace narrows Namespace and tenant Cluster collections; and
+- tenant responses retain stable table output while structured output
+  preserves the server response.
+
+It does not identify source packages, wire types, or endpoint paths.
+
+### Core design: Extension management
+
+This subsection explains:
+
+- Extension catalog and InstallPlan state belong to the host KubeSphere control
+  plane;
+- placement selects an explicit eligible set of member Clusters;
+- install, upgrade, configure, uninstall, wait, and diagnose are controlled
+  lifecycle operations rather than generic mutation verbs;
+- write operations guard accepted intent against conflicting or stale state;
+- asynchronous targets advance independently and waiting must not mistake old
+  status for the new operation; and
+- diagnosis summarizes controller, dependency, workload, and member status
+  without retrieving secrets or application logs.
+
+Detailed resource schemas, merge algorithms, object paths, field names, and
+diagnostic implementation rules are omitted.
+
+### Core design: Raw API requests
+
+This subsection explains:
+
+- `api` reuses normal connection, credential, TLS, timeout, and user-agent
+  resolution;
+- the caller owns the server-relative path, method, and optional body;
+- selected Cluster scope is not added automatically, so Cluster routing must be
+  explicit in the caller's path;
+- response bytes are passed through unchanged and HTTP error bodies remain
+  visible while the command returns a failure; and
+- ksctl does not type, validate, redact, or protect raw API operations with
+  Extension lifecycle safeguards.
+
+The document does not show command examples, request paths, flags, or source
+implementation.
+
+### Core design: Authentication and configuration
+
+This subsection explains:
+
+- Fleet owns a KubeSphere Endpoint, TLS settings, and Fleet-scoped Users;
+- Context selects one Fleet and User and may provide a default Cluster;
+- explicit flags and environment values override configured connection state;
+- explicit Endpoint overrides require an explicit Token and cannot borrow
+  Context credentials;
+- authoritative configured Token sources fail closed instead of silently
+  falling through;
+- valid cached Tokens are reused, refresh is attempted when possible, and a
+  configured Password is the final command-local fallback;
+- login authenticates, updates Config and Token cache atomically, and never
+  persists the supplied Password; and
+- logout makes a best-effort remote revocation, deletes the selected local
+  cache, and preserves Config.
+
+Exact precedence expressions, configuration schemas, cache paths, field names,
+and OAuth endpoint paths are omitted.
+
+### Security and compatibility
+
+This section consolidates the guarantees and trust boundaries developers must
+preserve:
+
+- password input is not echoed or persisted by login;
+- Config and Token caches use restricted, atomic writes;
+- sensitive output remains the caller's responsibility;
+- raw API requests and plugins may operate outside built-in read-only and
+  lifecycle safeguards;
+- KubeSphere 4.x is supported; and
+- aligned Kubernetes dependencies must move together when upgraded.
+
+It does not enumerate individual tests or restate build instructions.
+
+## Bilingual Mirroring Contract
+
+`docs/design.md` remains the canonical English source.
+`docs/design_zh.md` is its complete Simplified Chinese mirror.
+
+The mirror preserves:
+
+- H2/H3 hierarchy and section order;
+- paragraph, bullet, and numbered-list order;
+- command names and domain identifiers;
+- routing, failure, and security qualifications; and
+- language-matched links to the CLI guides.
+
+The Chinese prose should be concise and natural. Technical concepts such as
+Context, Fleet, User, Workspace, Cluster, Namespace, Endpoint, Token,
+InstallPlan, and kubeconfig remain recognizable and consistent. Command names
+and identifiers are not translated.
+
+Neither maintained design document contains fenced code blocks.
 
 ## Navigation
 
-Immediately below each H1:
-
-- `docs/design.md` shows **English** as the current language and links to
-  `design_zh.md`;
-- `docs/design_zh.md` links to `design.md` and shows **简体中文** as the current
-  language.
-
-The introductory link to the CLI guide follows the current document language:
-
-- the English design links to `cli.md`;
-- the Chinese design links to `cli_zh.md`.
-
-The `README.md` documentation section exposes separate entries:
-
-- Design (English) → `docs/design.md`;
-- 设计文档（简体中文）→ `docs/design_zh.md`.
-
-All navigation uses relative Markdown links so it works on GitHub and in local
-rendering.
-
-## Content Boundaries
-
-The design documents remain contributor and maintainer references, not command
-usage manuals. They explain ownership, data flow, routing, persistence,
-security, and compatibility. Detailed command syntax and workflows remain in
-the language-matched CLI guides.
-
-The read-only guarantee applies to the kubectl-style `get`, `describe`, `logs`,
-and `top` resource surface. Extension lifecycle commands remain constrained,
-purpose-built write operations. The `api` command is a lower-level authenticated
-transport escape hatch: the caller chooses the path, method, and optional body,
-so ksctl does not promise that these requests are read-only or protect
-resources with Extension-specific lifecycle checks.
-
-Historical files under `docs/superpowers/` remain decision records. They may
-be consulted while checking intent, but the current implementation and tests
-determine what the maintained design documents claim.
+Both design documents retain the language switcher below the title. The
+English introduction links to `cli.md`; the Chinese introduction links to
+`cli_zh.md`. `README.md` continues to expose separate English and Simplified
+Chinese design links.
 
 ## Validation
 
-The documentation-only implementation will verify:
+The rewritten documents will verify:
 
-1. current root registration, `api` implementation, relevant client packages,
-   and tests against every new English architecture claim;
-2. identical English and Chinese H2/H3 structure and section order;
-3. identical ordered fenced-code contents across both design documents;
-4. presence of the same command names, flags, environment variables, API
-   paths, package names, types, configuration keys, and versions where those
-   tokens occur in the English source;
-5. valid language switchers, language-matched CLI links, and README links;
-6. paired Markdown fences and consistent heading hierarchy;
-7. absence of `TODO`, `TBD`, placeholder prose, and unsupported claims;
+1. identical English and Chinese H2/H3 level sequences;
+2. identical paragraph-block, bullet, and numbered-list counts;
+3. identical inline technical-token sets where code spans are retained;
+4. zero fenced code blocks in either design document;
+5. no package paths, source-file paths, Go interface names, or test inventory;
+6. valid language switchers, CLI-guide links, and README links;
+7. no placeholders or unsupported architecture claims;
 8. `git diff --check`; and
-9. a final diff containing only `README.md`, `docs/design.md`,
-   `docs/design_zh.md`, and the approved specification and implementation plan.
+9. a final implementation diff limited to `README.md`, `docs/design.md`, and
+   `docs/design_zh.md`, plus the updated approved specification and plan.
 
-Because the implementation changes only Markdown, the verification boundary
-does not require the full Go test suite. Source and test inspection, structural
-mirror checks, link checks, Markdown checks, and `git diff --check` are the
-required evidence.
+The change is Markdown-only. Source and test inspection support factual
+review, but the full Go test suite is not required to validate the rewrite.
