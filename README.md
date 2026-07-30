@@ -112,11 +112,8 @@ accept the command-local `--namespace` flag.
 
 - [CLI guide (English)](docs/cli.md) — commands, scope, workflows, security, and
   troubleshooting.
-- [CLI 指南（简体中文）](docs/cli_zh.md) — ksctl 命令、作用域、工作流和故障排查。
 - [Design (English)](docs/design.md) — core design, cross-Cluster access,
   tenant and Extension flows, raw API requests, and authentication.
-- [设计文档（简体中文）](docs/design_zh.md) — 核心设计、跨集群访问、租户与扩展
-  组件流程、原始 API 请求和认证。
 
 ## Development
 
