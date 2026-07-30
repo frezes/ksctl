@@ -6,22 +6,13 @@
 
 `ksctl` 是 KubeSphere 4.x 的命令行客户端。它连接到 KubeSphere API 端点，可用于查看 KubeSphere 暴露的 Kubernetes 资源、租户资源以及管理 KubeSphere 扩展组件。
 
-同一命令树可通过两个入口使用：
-
-```bash
-ksctl get pods -A
-kubectl ks get pods -A
-```
-
-本指南中的示例使用 `ksctl`。使用 kubectl 插件时，请将其替换为 `kubectl ks`。
-
 通用资源命令（`get`、`describe`、`logs` 和 `top`）及租户命令均为只读。`install`、`configure` 和 `uninstall` 等扩展组件生命周期命令会更改 KubeSphere 状态。
 
 开始前，你需要：
 
 - 可访问的 KubeSphere 4.x API 端点。
 - KubeSphere 账户或持有者令牌。
-- `ksctl` 可执行文件，或位于 `PATH` 中的 `kubectl-ks`。
+- `ksctl` 可执行文件。
 - 要使用 `top` 的 Cluster 中已安装 Metrics Server。
 
 ## 命令语法

@@ -8,16 +8,6 @@
 KubeSphere Endpoint and lets you inspect Kubernetes resources exposed through
 KubeSphere, inspect tenant resources, and manage KubeSphere extensions.
 
-The same command tree is available through two entrypoints:
-
-```bash
-ksctl get pods -A
-kubectl ks get pods -A
-```
-
-Examples in this guide use `ksctl`. Replace it with `kubectl ks` when using the
-kubectl plugin.
-
 The generic resource commands (`get`, `describe`, `logs`, and `top`) and tenant
 commands are read-only. Extension lifecycle commands such as `install`,
 `configure`, and `uninstall` change KubeSphere state.
@@ -26,7 +16,7 @@ Before you begin, you need:
 
 - A reachable KubeSphere 4.x API Endpoint.
 - A KubeSphere account or bearer Token.
-- The `ksctl` executable, or `kubectl-ks` on `PATH`.
+- The `ksctl` executable.
 - Metrics Server in a Cluster where you want to use `top`.
 
 ## Command syntax
