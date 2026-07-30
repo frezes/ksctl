@@ -51,6 +51,7 @@ The command overview includes every current top-level command group:
 - `extension`
 - `api`
 - `plugin`
+- `completion`
 - `version`
 
 The README does not duplicate complete flag lists, environment-variable
