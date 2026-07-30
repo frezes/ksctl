@@ -4,9 +4,9 @@
 
 ## 简介
 
-`ksctl` 是 KubeSphere 4.x 的命令行客户端。它连接到 KubeSphere API 端点，可用于查看 KubeSphere 暴露的 Kubernetes 资源、租户资源以及管理 KubeSphere 扩展组件。
+`ksctl` 是 KubeSphere 4.x 的命令行客户端。它连接到 KubeSphere API 端点，用于查看资源和管理 KubeSphere 扩展组件。兼容 kubectl 的资源命令支持通过 `--cluster` 跨集群查看资源；租户命令用于查看当前租户可访问的资源在 Workspace、Namespace 和 Cluster 中的分布。
 
-通用资源命令（`get`、`describe`、`logs` 和 `top`）及租户命令均为只读。`install`、`configure` 和 `uninstall` 等扩展组件生命周期命令会更改 KubeSphere 状态。
+这些查看命令均为只读。`install`、`configure` 和 `uninstall` 等扩展组件生命周期命令会更改 KubeSphere 状态。
 
 开始前，你需要：
 
@@ -39,28 +39,20 @@ ksctl COMMAND --help
 | 租户管理 | 查看 Workspace 及其 Namespace 和 Cluster。 | `tenant` | 可用 |
 | 扩展组件管理 | 查看、安装、配置、诊断和移除扩展组件。 | `extension` | 可用 |
 | 应用管理 | 管理 KubeSphere 应用。 | — | 暂未提供 |
-| 其他 | 认证、选择 Context、调用 API、生成 kubeconfig 和使用插件。 | `auth`、`config`、`api`、`plugin` | 可用 |
+| 其他 | 认证、调用 API 和使用插件。 | `auth`、`config`、`api`、`plugin` | 可用 |
 
 ## Kubernetes 资源管理
 
-资源命令使用与 kubectl 兼容的资源发现、选择器、输出器和工作负载日志行为。资源类型及其作用域来自已连接的服务器，而不是 ksctl 中的静态注册表。
+资源命令遵循 kubectl 的资源发现、选择器、输出和日志习惯。本指南假定用户熟悉 kubectl，仅说明 ksctl 特有的作用域选择。
 
 ### 选择资源作用域
 
 | 概念 | 含义 |
 | --- | --- |
-| Context | 选择 Fleet、用户及可选的默认 Cluster。 |
-| Cluster | 选择请求使用的 Kubernetes Cluster；可使用 `--cluster` 覆盖。 |
-| Namespace | 使用 `-n` 或 `--namespace` 选择 Kubernetes Namespace 或 KubeSphere 项目。 |
-| 所有 Namespace | 在命令支持时使用 `-A` 或 `--all-namespaces`。 |
-
-可以为单个命令覆盖已选择的作用域：
-
-```bash
-ksctl get pods -n demo
-ksctl get pods -A --cluster member-1
-ksctl describe deployment web -n demo --cluster member-1
-```
+| Context | 选择 KubeSphere 连接和身份。 |
+| Cluster | 选择目标 Cluster；可通过 `--cluster` 为单个命令指定。 |
+| Namespace | 选择 Kubernetes Namespace 或 KubeSphere 项目。 |
+| Workspace | 表示租户作用域，用于查看可访问的 Namespace 和 Cluster。 |
 
 ### 查看资源
 
@@ -68,7 +60,7 @@ ksctl describe deployment web -n demo --cluster member-1
 | --- | --- |
 | `ksctl get TYPE [NAME]` | 显示一个或多个资源。 |
 | `ksctl describe TYPE [NAME_PREFIX]` | 显示详细状态和相关信息。 |
-| `ksctl logs (POD \| TYPE/NAME)` | 输出或持续跟踪容器日志。 |
+| `ksctl logs (POD \| TYPE/NAME)` | 输出容器日志。 |
 | `ksctl top (pod \| node) [NAME]` | 显示当前 CPU 和内存用量。 |
 
 使用 `get` 获取列表、结构化输出和脚本结果：
@@ -95,10 +87,9 @@ ksctl describe pod/web-0 -n demo --cluster member-1
 ```bash
 ksctl logs pod/web-0 -n demo
 ksctl logs deployment/web -n demo --all-pods
-ksctl logs deployment/web -n demo --all-pods --follow
 ```
 
-该命令通过 KubeSphere API 端点读取所选 Cluster 中的日志。它不会搜索日志扩展组件，也不会在流中断后重新连接。日志可能包含敏感数据，请妥善保护终端捕获内容和重定向文件。
+该命令通过 KubeSphere API 端点读取所选 Cluster 中的日志，且不会搜索日志扩展组件。日志可能包含敏感数据，请妥善保护终端捕获内容和重定向文件。
 
 ### 查看当前资源用量
 
@@ -334,7 +325,3 @@ ksctl api /kapis/version
 ### Metrics API 不可用
 
 `top` 要求所选 Cluster 中存在 Metrics Server 和可发现的 `metrics.k8s.io/v1beta1` APIService。请检查 Metrics Server 部署、APIService 可用性和 `--cluster` 值。
-
-### 使用 `--follow` 时日志流中断
-
-当服务器关闭流、用户取消流、请求失败或非零 `--request-timeout` 到期时，持续跟踪的日志流会结束。ksctl 不会重新连接或恢复该流。
