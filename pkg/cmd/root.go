@@ -102,7 +102,7 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 	))
 	cmd.AddCommand(tenantcmd.NewCommand(kubeSphereGetter))
 
-	factory := cmdutil.NewFactory(kubernetesGetter)
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(kubernetesGetter))
 	kubeStreams := genericiooptions.IOStreams{
 		In:     streams.In,
 		Out:    streams.Out,

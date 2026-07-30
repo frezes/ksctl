@@ -417,3 +417,92 @@ func TestKubeDeleteRoutesMutationThroughSpecifiedCluster(t *testing.T) {
 		t.Fatalf("DELETE paths = %v, want [%s]", deletePaths, want)
 	}
 }
+
+func TestKubeExecBuildsCoreV1RESTClientForUpgradedTransport(t *testing.T) {
+	const helperEnv = "KSCTL_TEST_KUBE_EXEC_CORE_V1_CONFIG"
+	if os.Getenv(helperEnv) == "1" {
+		command := NewRootCommand(
+			IOStreams{Out: os.Stdout, ErrOut: os.Stderr},
+			VersionInfo{Version: "test"},
+		)
+		command.SetArgs([]string{
+			"kube", "exec",
+			"--namespace", "default",
+			"--endpoint", os.Getenv("KSCTL_TEST_KUBE_EXEC_ENDPOINT"),
+			"--token", "secret",
+			"--cluster", "member",
+			"demo-pod", "--", "true",
+		})
+		_ = command.Execute()
+		return
+	}
+
+	const prefix = "/clusters/member"
+	var lock sync.Mutex
+	execReached := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", got)
+		}
+		if !strings.HasPrefix(r.URL.Path, prefix+"/") {
+			t.Errorf("request path %q is not scoped to %q", r.URL.Path, prefix)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch strings.TrimPrefix(r.URL.Path, prefix) {
+		case "/api":
+			writeAPIJSON(t, w, metav1.APIVersions{
+				TypeMeta: metav1.TypeMeta{Kind: "APIVersions", APIVersion: "v1"},
+				Versions: []string{"v1"},
+			})
+		case "/apis":
+			writeAPIJSON(t, w, metav1.APIGroupList{
+				TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+			})
+		case "/api/v1":
+			writeAPIJSON(t, w, metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{{
+					Name:         "pods",
+					SingularName: "pod",
+					Namespaced:   true,
+					Kind:         "Pod",
+					Verbs:        metav1.Verbs{"get"},
+					ShortNames:   []string{"po"},
+				}},
+			})
+		case "/api/v1/namespaces/default/pods/demo-pod":
+			writeAPIJSON(t, w, podObject())
+		case "/api/v1/namespaces/default/pods/demo-pod/exec":
+			lock.Lock()
+			execReached = true
+			lock.Unlock()
+			http.Error(w, "upgrade intentionally rejected by test server", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	helper := exec.Command(os.Args[0], "-test.run=^TestKubeExecBuildsCoreV1RESTClientForUpgradedTransport$")
+	helper.Env = append(
+		os.Environ(),
+		helperEnv+"=1",
+		"KSCTL_TEST_KUBE_EXEC_ENDPOINT="+server.URL,
+		"KSCTL_CONFIG="+filepath.Join(t.TempDir(), "config.yaml"),
+	)
+	output, err := helper.CombinedOutput()
+	if err == nil {
+		t.Fatalf("exec helper succeeded, want rejected upgrade:\n%s", output)
+	}
+	if strings.Contains(string(output), "GroupVersion is required") {
+		t.Fatalf("exec helper output = %q, want a configured core/v1 REST client", output)
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	if !execReached {
+		t.Fatalf("exec endpoint was not reached; helper output:\n%s", output)
+	}
+}
