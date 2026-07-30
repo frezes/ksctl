@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   best-effort basis before clearing local login state.
 - Add `auth whoami` to verify the selected KubeSphere credential and display
   the server-side User and global role.
-- Add kubectl-compatible `ksctl-*` executable plugins to both `ksctl` and
-  `kubectl ks`, including longest-name dispatch and `plugin list` diagnostics.
+- Add kubectl-compatible `ksctl-*` executable plugins, including longest-name
+  dispatch and `plugin list` diagnostics.
 - Add `tenant get` commands for KSE Workspaces, Namespaces, and Clusters with
   Workspace and member-Cluster routing plus kubectl-style table output.
 
@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Standalone `ksctl` and `kubectl ks` entrypoints.
+- Standalone `ksctl` entrypoint.
 - KubeSphere authentication, Fleet/User-scoped token caching, and context management.
 - Kubernetes-compatible `get` and `describe` commands with cross-cluster discovery.
 - Linux and macOS release archives for amd64 and arm64.
@@ -38,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Display `kubectl ks` consistently in plugin help.
 - Remove the non-functional `--workspace` flag.
 - Keep Go module metadata tidy and reproducible.
 
