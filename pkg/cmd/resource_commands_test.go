@@ -32,7 +32,7 @@ func TestNativeTopPodUsesFallbackDiscoveryThroughSpecifiedCluster(t *testing.T) 
 		VersionInfo{Version: "test"},
 	)
 	cmd.SetArgs([]string{
-		"top", "pod",
+		"kube", "top", "pod",
 		"--namespace", "demo",
 		"--use-protocol-buffers=false",
 		"--endpoint", server.URL,
@@ -61,7 +61,7 @@ func TestNativeTopPodAllNamespacesForwardsSelector(t *testing.T) {
 		VersionInfo{Version: "test"},
 	)
 	cmd.SetArgs([]string{
-		"top", "pod",
+		"kube", "top", "pod",
 		"--all-namespaces",
 		"--selector", "app=demo",
 		"--use-protocol-buffers=false",
@@ -91,7 +91,7 @@ func TestNativeTopNodeUsesFallbackDiscoveryThroughSpecifiedCluster(t *testing.T)
 		VersionInfo{Version: "test"},
 	)
 	cmd.SetArgs([]string{
-		"top", "node",
+		"kube", "top", "node",
 		"--use-protocol-buffers=false",
 		"--endpoint", server.URL,
 		"--token", "secret",
@@ -116,7 +116,7 @@ func TestNativeTopReportsUnavailableMetricsAPI(t *testing.T) {
 			VersionInfo{Version: "test"},
 		)
 		cmd.SetArgs([]string{
-			"top", "pod",
+			"kube", "top", "pod",
 			"--use-protocol-buffers=false",
 			"--endpoint", os.Getenv("KSCTL_TEST_TOP_ENDPOINT"),
 			"--token", "secret",
@@ -167,7 +167,7 @@ func TestNativeTopPreservesForbiddenMetricsError(t *testing.T) {
 			VersionInfo{Version: "test"},
 		)
 		cmd.SetArgs([]string{
-			"top", "pod",
+			"kube", "top", "pod",
 			"--use-protocol-buffers=false",
 			"--endpoint", os.Getenv("KSCTL_TEST_TOP_ENDPOINT"),
 			"--token", "secret",
@@ -241,7 +241,7 @@ func TestNativeLogsThroughSpecifiedCluster(t *testing.T) {
 		VersionInfo{Version: "test"},
 	)
 	cmd.SetArgs([]string{
-		"logs", "demo-pod",
+		"kube", "logs", "demo-pod",
 		"--namespace", "default",
 		"--container", "demo",
 		"--tail", "2",
@@ -287,7 +287,7 @@ func TestNativeLogsUsesContextDefaultCluster(t *testing.T) {
 		VersionInfo{Version: "test"},
 	)
 	cmd.SetArgs([]string{
-		"logs", "demo-pod",
+		"kube", "logs", "demo-pod",
 		"--namespace", "default",
 		"--container", "demo",
 		"--tail", "2",
@@ -312,7 +312,7 @@ func TestNativeLogsResolvesWorkloadWithDiscoveryFallback(t *testing.T) {
 		VersionInfo{Version: "test"},
 	)
 	cmd.SetArgs([]string{
-		"logs", "deployment/demo-deployment",
+		"kube", "logs", "deployment/demo-deployment",
 		"--namespace", "default",
 		"--all-pods",
 		"--all-containers",
@@ -341,7 +341,7 @@ func TestNativeLogsFollowStopsWhenContextIsCancelled(t *testing.T) {
 	)
 	cmd.SetContext(ctx)
 	cmd.SetArgs([]string{
-		"logs", "demo-pod",
+		"kube", "logs", "demo-pod",
 		"--namespace", "default",
 		"--follow",
 		"--ignore-errors",
@@ -603,7 +603,7 @@ func TestNativeDescribeUsesContextDefaultCluster(t *testing.T) {
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
 	cmd.SetArgs([]string{
-		"describe", "pod/demo-pod",
+		"kube", "describe", "pod/demo-pod",
 		"--namespace", "default",
 		"--token", "secret",
 		"--show-events=false",
@@ -624,7 +624,7 @@ func TestNativeDescribeThroughKSApiServer(t *testing.T) {
 	out := new(bytes.Buffer)
 	cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "test"})
 	cmd.SetArgs([]string{
-		"describe", "workspace", "demo",
+		"kube", "describe", "workspace", "demo",
 		"--endpoint", server.URL,
 		"--token", "secret",
 		"--show-events=false",

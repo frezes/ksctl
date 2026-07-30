@@ -185,7 +185,7 @@ func TestRootHelpUsesEnglishRegardlessOfLocale(t *testing.T) {
 	if os.Getenv(helperEnv) == "1" {
 		out := new(bytes.Buffer)
 		cmd := NewRootCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
-		cmd.SetArgs([]string{"--help"})
+		cmd.SetArgs([]string{"kube", "--help"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("Execute() error = %v", err)
 		}
@@ -233,100 +233,112 @@ func TestEntrypointHelpUsesDisplayName(t *testing.T) {
 	}
 }
 
-func TestEntrypointLogsHelpUsesDisplayName(t *testing.T) {
-	out := new(bytes.Buffer)
-	cmd := newTestEntrypointCommand(
-		t,
-		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
-		VersionInfo{Version: "dev"},
-	)
-	cmd.SetArgs([]string{"logs", "--help"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	help := out.String()
-	if !strings.Contains(help, "Usage:\n  fixture entrypoint logs") {
-		t.Fatalf("entrypoint logs usage = %q", help)
-	}
-	if !strings.Contains(help, "fixture entrypoint logs nginx") {
-		t.Fatalf("entrypoint logs examples = %q", help)
+func TestKubeResourceHelpUsesEntrypointDisplayName(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		newRoot func() *cobra.Command
+		want    string
+	}{
+		{
+			name: "standalone",
+			newRoot: func() *cobra.Command {
+				return NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+			},
+			want: "ksctl kube",
+		},
+		{
+			name: "alternate entrypoint",
+			newRoot: func() *cobra.Command {
+				return newTestEntrypointCommand(t, IOStreams{}, VersionInfo{Version: "dev"})
+			},
+			want: "fixture entrypoint kube",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, path := range [][]string{
+				{"get", "--help"},
+				{"logs", "--help"},
+				{"top", "pod", "--help"},
+			} {
+				out := new(bytes.Buffer)
+				root := test.newRoot()
+				root.SetOut(out)
+				root.SetErr(out)
+				root.SetArgs(append([]string{"kube"}, path...))
+				if err := root.Execute(); err != nil {
+					t.Fatalf("Execute(%v) error = %v", path, err)
+				}
+				if !strings.Contains(out.String(), test.want+" "+strings.Join(path[:len(path)-1], " ")) {
+					t.Fatalf("help = %q, want display path %q", out.String(), test.want)
+				}
+			}
+		})
 	}
 }
 
-func TestEntrypointTopHelpUsesDisplayNameRecursively(t *testing.T) {
-	out := new(bytes.Buffer)
-	cmd := newTestEntrypointCommand(
-		t,
-		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
-		VersionInfo{Version: "dev"},
-	)
-	cmd.SetArgs([]string{"top", "pod", "--help"})
+func TestRootRegistersKubeResourceCommands(t *testing.T) {
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v", err)
+	rootGet := findSubcommand(root, "get")
+	if rootGet == nil {
+		t.Fatal("root get command is not registered")
 	}
-	help := out.String()
-	if !strings.Contains(help, "Usage:\n  fixture entrypoint top pod") {
-		t.Fatalf("entrypoint top pod usage = %q", help)
-	}
-	if !strings.Contains(help, "fixture entrypoint top pod") {
-		t.Fatalf("entrypoint top pod examples = %q", help)
-	}
-}
-
-func TestRootRegistersNativeResourceCommands(t *testing.T) {
-	cmd := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
-
-	getCommand := findSubcommand(cmd, "get")
-	if getCommand == nil {
-		t.Fatal("get command is not registered")
-	}
-	if findSubcommand(cmd, "describe") == nil {
-		t.Fatal("describe command is not registered")
-	}
-	if findSubcommand(cmd, "list") != nil {
-		t.Fatal("list command is registered")
-	}
-	logsCommand := findSubcommand(cmd, "logs")
-	if logsCommand == nil {
-		t.Fatal("logs command is not registered")
-	}
-	for _, name := range []string{"follow", "previous", "container", "tail"} {
-		if logsCommand.Flags().Lookup(name) == nil {
-			t.Errorf("logs flag --%s is not registered", name)
+	for _, name := range []string{"describe", "logs", "top"} {
+		if findSubcommand(root, name) != nil {
+			t.Errorf("root %s command is registered", name)
 		}
 	}
-	topCommand := findSubcommand(cmd, "top")
-	if topCommand == nil {
-		t.Fatal("top command is not registered")
+
+	kube := findSubcommand(root, "kube")
+	if kube == nil {
+		t.Fatal("kube command is not registered")
 	}
-	topPod := findSubcommand(topCommand, "pod")
-	if topPod == nil || topPod.Flags().Lookup("containers") == nil {
-		t.Fatal("top pod --containers is not registered")
-	}
-	topNode := findSubcommand(topCommand, "node")
-	if topNode == nil || topNode.Flags().Lookup("show-capacity") == nil {
-		t.Fatal("top node --show-capacity is not registered")
+	kubeGet := findSubcommand(kube, "get")
+	if kubeGet == nil {
+		t.Fatal("kube get command is not registered")
 	}
 	for _, name := range []string{"output", "watch", "watch-only", "selector"} {
-		if getCommand.Flags().Lookup(name) == nil {
-			t.Errorf("get flag --%s is not registered", name)
+		if rootGet.Flags().Lookup(name) == nil {
+			t.Errorf("root get flag --%s is not registered", name)
+		}
+		if kubeGet.Flags().Lookup(name) == nil {
+			t.Errorf("kube get flag --%s is not registered", name)
 		}
 	}
-	if describeCommand := findSubcommand(cmd, "describe"); describeCommand != nil {
-		if describeCommand.Flags().Lookup("show-events") == nil {
-			t.Error("describe flag --show-events is not registered")
+
+	describe := findSubcommand(kube, "describe")
+	if describe == nil || describe.Flags().Lookup("show-events") == nil {
+		t.Fatal("kube describe --show-events is not registered")
+	}
+	logs := findSubcommand(kube, "logs")
+	if logs == nil {
+		t.Fatal("kube logs command is not registered")
+	}
+	for _, name := range []string{"follow", "previous", "container", "tail"} {
+		if logs.Flags().Lookup(name) == nil {
+			t.Errorf("kube logs flag --%s is not registered", name)
 		}
+	}
+	top := findSubcommand(kube, "top")
+	if top == nil {
+		t.Fatal("kube top command is not registered")
+	}
+	topPod := findSubcommand(top, "pod")
+	if topPod == nil || topPod.Flags().Lookup("containers") == nil {
+		t.Fatal("kube top pod --containers is not registered")
+	}
+	topNode := findSubcommand(top, "node")
+	if topNode == nil || topNode.Flags().Lookup("show-capacity") == nil {
+		t.Fatal("kube top node --show-capacity is not registered")
 	}
 }
 
-func TestPluginListReportsLogsAndTopAsBuiltInConflicts(t *testing.T) {
+func TestPluginListReportsRootGetAndKubeAsBuiltInConflicts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test plugin fixtures use Unix executable mode bits")
 	}
 	directory := t.TempDir()
-	for _, name := range []string{"ksctl-logs", "ksctl-top"} {
+	for _, name := range []string{"ksctl-get", "ksctl-kube", "ksctl-logs", "ksctl-top"} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("plugin"), 0o755); err != nil {
 			t.Fatalf("WriteFile(%q) error = %v", name, err)
 		}
@@ -346,11 +358,16 @@ func TestPluginListReportsLogsAndTopAsBuiltInConflicts(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	for _, want := range []string{
-		`ksctl-logs overwrites existing command: "ksctl logs"`,
-		`ksctl-top overwrites existing command: "ksctl top"`,
+		`ksctl-get overwrites existing command: "ksctl get"`,
+		`ksctl-kube overwrites existing command: "ksctl kube"`,
 	} {
 		if !strings.Contains(errOut.String(), want) {
 			t.Fatalf("stderr = %q, want %q", errOut.String(), want)
+		}
+	}
+	for _, unwanted := range []string{"ksctl-logs overwrites", "ksctl-top overwrites"} {
+		if strings.Contains(errOut.String(), unwanted) {
+			t.Fatalf("stderr = %q, does not want %q", errOut.String(), unwanted)
 		}
 	}
 }
@@ -604,57 +621,65 @@ func TestRootTenantFleetResourcesIgnoreInvalidExplicitCluster(t *testing.T) {
 	}
 }
 
-func TestRootConnectionFlags(t *testing.T) {
-	cmd := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
-	for _, name := range []string{
-		"endpoint",
-		"token",
-		"context",
-		"cluster",
-		"request-timeout",
-		"v",
-	} {
-		if cmd.PersistentFlags().Lookup(name) == nil {
+func TestRootAndKubeConnectionFlagScopes(t *testing.T) {
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	for _, name := range []string{"endpoint", "token", "context", "cluster", "v"} {
+		if root.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("persistent flag --%s is not registered", name)
 		}
 	}
-	for _, name := range []string{"insecure-skip-tls-verify", "namespace", "no-interactive", "workspace"} {
-		if cmd.PersistentFlags().Lookup(name) != nil {
-			t.Errorf("persistent flag --%s is registered", name)
+	for _, name := range []string{
+		"insecure-skip-tls-verify",
+		"namespace",
+		"no-interactive",
+		"request-timeout",
+		"workspace",
+	} {
+		if root.PersistentFlags().Lookup(name) != nil {
+			t.Errorf("root persistent flag --%s is registered", name)
 		}
 	}
-}
 
-func TestResourceCommandNamespaceFlags(t *testing.T) {
-	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	kube := findSubcommand(root, "kube")
+	if kube == nil {
+		t.Fatal("kube command is not registered")
+	}
+	namespace := kube.PersistentFlags().Lookup("namespace")
+	if namespace == nil || namespace.Shorthand != "n" {
+		t.Fatalf("kube --namespace = %#v, want persistent -n flag", namespace)
+	}
+	if kube.PersistentFlags().Lookup("request-timeout") == nil {
+		t.Fatal("kube persistent --request-timeout is not registered")
+	}
+
+	rootGet := findSubcommand(root, "get")
+	namespace = rootGet.LocalNonPersistentFlags().Lookup("namespace")
+	if namespace == nil || namespace.Shorthand != "n" {
+		t.Fatalf("root get --namespace = %#v, want command-local -n flag", namespace)
+	}
+	if rootGet.Flags().Lookup("request-timeout") != nil {
+		t.Fatal("root get exposes --request-timeout")
+	}
+
 	for _, path := range [][]string{
 		{"get"},
 		{"describe"},
 		{"logs"},
 		{"top", "pod"},
 	} {
-		command := root
+		command := kube
 		for _, name := range path {
 			command = findSubcommand(command, name)
 			if command == nil {
-				t.Fatalf("command %q is not registered", strings.Join(path, " "))
+				t.Fatalf("kube %s is not registered", strings.Join(path, " "))
 			}
 		}
-		flag := command.LocalNonPersistentFlags().Lookup("namespace")
-		if flag == nil {
-			t.Errorf("%s does not define --namespace", strings.Join(path, " "))
-		} else if flag.Shorthand != "n" {
-			t.Errorf(
-				"%s --namespace shorthand = %q, want n",
-				strings.Join(path, " "),
-				flag.Shorthand,
-			)
+		if command.InheritedFlags().Lookup("namespace") == nil {
+			t.Errorf("kube %s does not inherit --namespace", strings.Join(path, " "))
 		}
-	}
-
-	topNode := findSubcommand(findSubcommand(root, "top"), "node")
-	if topNode.LocalNonPersistentFlags().Lookup("namespace") != nil {
-		t.Error("top node defines --namespace")
+		if command.InheritedFlags().Lookup("request-timeout") == nil {
+			t.Errorf("kube %s does not inherit --request-timeout", strings.Join(path, " "))
+		}
 	}
 }
 
