@@ -34,10 +34,6 @@ func NewRootCommand(streams IOStreams, info VersionInfo) *cobra.Command {
 	return newRootCommand("ksctl", "", streams, info)
 }
 
-func NewKubectlPluginCommand(streams IOStreams, info VersionInfo) *cobra.Command {
-	return newRootCommand("kubectl-ks", "kubectl ks", streams, info)
-}
-
 func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo) *cobra.Command {
 	loadEnglishTranslationsOnce.Do(func() {
 		loadEnglishTranslationsErr = kubectli18n.LoadTranslations("kubectl", func() string { return "default" })

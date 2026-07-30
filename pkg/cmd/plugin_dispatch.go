@@ -42,10 +42,15 @@ func NewRootCommandWithArgs(streams IOStreams, info VersionInfo, arguments []str
 	)
 }
 
-func NewKubectlPluginCommandWithArgs(streams IOStreams, info VersionInfo, arguments []string) (*cobra.Command, error) {
+func NewEntrypointCommandWithArgs(
+	use, displayName string,
+	streams IOStreams,
+	info VersionInfo,
+	arguments []string,
+) (*cobra.Command, error) {
 	return newRootCommandWithArgs(
-		"kubectl-ks",
-		"kubectl ks",
+		use,
+		displayName,
 		streams,
 		info,
 		arguments,

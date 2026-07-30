@@ -16,6 +16,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	testEntrypointUse         = "fixture-entrypoint"
+	testEntrypointDisplayName = "fixture entrypoint"
+)
+
+func newTestEntrypointCommand(
+	t *testing.T,
+	streams IOStreams,
+	info VersionInfo,
+) *cobra.Command {
+	t.Helper()
+	command, err := NewEntrypointCommandWithArgs(
+		testEntrypointUse,
+		testEntrypointDisplayName,
+		streams,
+		info,
+		[]string{testEntrypointUse},
+	)
+	if err != nil {
+		t.Fatalf("NewEntrypointCommandWithArgs() error = %v", err)
+	}
+	return command
+}
+
 func TestRootVersionPrintsClientAndTargetVersions(t *testing.T) {
 	t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	requests := 0
@@ -189,25 +213,30 @@ func TestRootHelpUsesEnglishRegardlessOfLocale(t *testing.T) {
 	}
 }
 
-func TestKubectlPluginHelpUsesDisplayName(t *testing.T) {
+func TestEntrypointHelpUsesDisplayName(t *testing.T) {
 	out := new(bytes.Buffer)
-	cmd := NewKubectlPluginCommand(IOStreams{Out: out, ErrOut: new(bytes.Buffer)}, VersionInfo{Version: "dev"})
+	cmd := newTestEntrypointCommand(
+		t,
+		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+		VersionInfo{Version: "dev"},
+	)
 	cmd.SetArgs([]string{"get", "--help"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	help := out.String()
-	if !strings.Contains(help, "Usage:\n  kubectl ks get") || strings.Contains(help, "Usage:\n  kubectl get") {
-		t.Fatalf("plugin help = %q", help)
+	if !strings.Contains(help, "Usage:\n  fixture entrypoint get") {
+		t.Fatalf("entrypoint help = %q", help)
 	}
-	if !strings.Contains(help, "kubectl ks get pods") || strings.Contains(help, "kubectl get pods") {
-		t.Fatalf("plugin examples should use kubectl ks: %q", help)
+	if !strings.Contains(help, "fixture entrypoint get pods") {
+		t.Fatalf("entrypoint examples = %q", help)
 	}
 }
 
-func TestKubectlPluginLogsHelpUsesDisplayName(t *testing.T) {
+func TestEntrypointLogsHelpUsesDisplayName(t *testing.T) {
 	out := new(bytes.Buffer)
-	cmd := NewKubectlPluginCommand(
+	cmd := newTestEntrypointCommand(
+		t,
 		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
 		VersionInfo{Version: "dev"},
 	)
@@ -217,19 +246,18 @@ func TestKubectlPluginLogsHelpUsesDisplayName(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	help := out.String()
-	if !strings.Contains(help, "Usage:\n  kubectl ks logs") ||
-		strings.Contains(help, "Usage:\n  kubectl logs") {
-		t.Fatalf("plugin logs usage = %q", help)
+	if !strings.Contains(help, "Usage:\n  fixture entrypoint logs") {
+		t.Fatalf("entrypoint logs usage = %q", help)
 	}
-	if !strings.Contains(help, "kubectl ks logs nginx") ||
-		strings.Contains(help, "kubectl logs nginx") {
-		t.Fatalf("plugin logs examples should use kubectl ks: %q", help)
+	if !strings.Contains(help, "fixture entrypoint logs nginx") {
+		t.Fatalf("entrypoint logs examples = %q", help)
 	}
 }
 
-func TestKubectlPluginTopHelpUsesDisplayNameRecursively(t *testing.T) {
+func TestEntrypointTopHelpUsesDisplayNameRecursively(t *testing.T) {
 	out := new(bytes.Buffer)
-	cmd := NewKubectlPluginCommand(
+	cmd := newTestEntrypointCommand(
+		t,
 		IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
 		VersionInfo{Version: "dev"},
 	)
@@ -239,13 +267,11 @@ func TestKubectlPluginTopHelpUsesDisplayNameRecursively(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	help := out.String()
-	if !strings.Contains(help, "Usage:\n  kubectl ks top pod") ||
-		strings.Contains(help, "Usage:\n  kubectl top pod") {
-		t.Fatalf("plugin top pod usage = %q", help)
+	if !strings.Contains(help, "Usage:\n  fixture entrypoint top pod") {
+		t.Fatalf("entrypoint top pod usage = %q", help)
 	}
-	if !strings.Contains(help, "kubectl ks top pod") ||
-		strings.Contains(help, "kubectl top pod -l") {
-		t.Fatalf("plugin top pod examples should use kubectl ks: %q", help)
+	if !strings.Contains(help, "fixture entrypoint top pod") {
+		t.Fatalf("entrypoint top pod examples = %q", help)
 	}
 }
 
@@ -340,37 +366,33 @@ func TestRootRegistersPluginListCommand(t *testing.T) {
 	}
 }
 
-func TestRootRegistersExtensionCommandsForBothEntrypoints(t *testing.T) {
-	for _, root := range []*cobra.Command{
-		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
-		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
+func TestRootRegistersExtensionCommands(t *testing.T) {
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	extension := findSubcommand(root, "extension")
+	if extension == nil {
+		t.Fatalf("%s does not register extension", root.DisplayName())
+	}
+	for _, name := range []string{
+		"list",
+		"show",
+		"versions",
+		"status",
+		"install",
+		"upgrade",
+		"configure",
+		"uninstall",
+		"diagnose",
 	} {
-		extension := findSubcommand(root, "extension")
-		if extension == nil {
-			t.Fatalf("%s does not register extension", root.DisplayName())
+		if findSubcommand(extension, name) == nil {
+			t.Fatalf(
+				"%s extension does not register %s",
+				root.DisplayName(),
+				name,
+			)
 		}
-		for _, name := range []string{
-			"list",
-			"show",
-			"versions",
-			"status",
-			"install",
-			"upgrade",
-			"configure",
-			"uninstall",
-			"diagnose",
-		} {
-			if findSubcommand(extension, name) == nil {
-				t.Fatalf(
-					"%s extension does not register %s",
-					root.DisplayName(),
-					name,
-				)
-			}
-		}
-		if findSubcommand(extension, "logs") != nil {
-			t.Fatalf("%s extension unexpectedly registers logs", root.DisplayName())
-		}
+	}
+	if findSubcommand(extension, "logs") != nil {
+		t.Fatalf("%s extension unexpectedly registers logs", root.DisplayName())
 	}
 }
 
@@ -386,12 +408,13 @@ func TestExtensionHelpUsesEntrypointDisplayName(t *testing.T) {
 			want: "ksctl extension install",
 		},
 		{
-			name: "kubectl plugin",
-			root: NewKubectlPluginCommand(
+			name: "alternate entrypoint",
+			root: newTestEntrypointCommand(
+				t,
 				IOStreams{},
 				VersionInfo{Version: "dev"},
 			),
-			want: "kubectl ks extension install",
+			want: "fixture entrypoint extension install",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -420,7 +443,15 @@ func TestPluginHelpUsesEntrypointDisplayName(t *testing.T) {
 		want string
 	}{
 		{name: "standalone", root: NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}), want: "ksctl plugin list"},
-		{name: "kubectl", root: NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}), want: "kubectl ks plugin list"},
+		{
+			name: "alternate entrypoint",
+			root: newTestEntrypointCommand(
+				t,
+				IOStreams{},
+				VersionInfo{Version: "dev"},
+			),
+			want: "fixture entrypoint plugin list",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			out := new(bytes.Buffer)
@@ -437,42 +468,34 @@ func TestPluginHelpUsesEntrypointDisplayName(t *testing.T) {
 }
 
 func TestRootRegistersNestedAuthCommands(t *testing.T) {
-	for _, root := range []*cobra.Command{
-		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
-		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
-	} {
-		auth := findSubcommand(root, "auth")
-		if auth == nil {
-			t.Fatal("auth command is not registered")
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	auth := findSubcommand(root, "auth")
+	if auth == nil {
+		t.Fatal("auth command is not registered")
+	}
+	for _, name := range []string{"login", "logout", "whoami"} {
+		if findSubcommand(auth, name) == nil {
+			t.Fatalf("auth %s command is not registered", name)
 		}
-		for _, name := range []string{"login", "logout", "whoami"} {
-			if findSubcommand(auth, name) == nil {
-				t.Fatalf("auth %s command is not registered", name)
-			}
-			if findSubcommand(root, name) != nil {
-				t.Fatalf("top-level %s command is registered", name)
-			}
+		if findSubcommand(root, name) != nil {
+			t.Fatalf("top-level %s command is registered", name)
 		}
 	}
 }
 
 func TestRootRegistersTenantGetCommands(t *testing.T) {
-	for _, root := range []*cobra.Command{
-		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
-		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
-	} {
-		tenant := findSubcommand(root, "tenant")
-		if tenant == nil {
-			t.Fatal("tenant command is not registered")
-		}
-		get := findSubcommand(tenant, "get")
-		if get == nil {
-			t.Fatal("tenant get command is not registered")
-		}
-		for _, name := range []string{"workspace", "namespace", "cluster"} {
-			if findSubcommand(get, name) == nil {
-				t.Fatalf("tenant get %s command is not registered", name)
-			}
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	tenant := findSubcommand(root, "tenant")
+	if tenant == nil {
+		t.Fatal("tenant command is not registered")
+	}
+	get := findSubcommand(tenant, "get")
+	if get == nil {
+		t.Fatal("tenant get command is not registered")
+	}
+	for _, name := range []string{"workspace", "namespace", "cluster"} {
+		if findSubcommand(get, name) == nil {
+			t.Fatalf("tenant get %s command is not registered", name)
 		}
 	}
 }
@@ -635,19 +658,15 @@ func TestResourceCommandNamespaceFlags(t *testing.T) {
 	}
 }
 
-func TestRootRegistersAPICommandForBothEntrypoints(t *testing.T) {
-	for _, root := range []*cobra.Command{
-		NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"}),
-		NewKubectlPluginCommand(IOStreams{}, VersionInfo{Version: "dev"}),
-	} {
-		api := findSubcommand(root, "api")
-		if api == nil {
-			t.Fatalf("%s does not register api", root.DisplayName())
-		}
-		for _, name := range []string{"method", "data"} {
-			if api.Flags().Lookup(name) == nil {
-				t.Errorf("%s api flag --%s is not registered", root.DisplayName(), name)
-			}
+func TestRootRegistersAPICommand(t *testing.T) {
+	root := NewRootCommand(IOStreams{}, VersionInfo{Version: "dev"})
+	api := findSubcommand(root, "api")
+	if api == nil {
+		t.Fatalf("%s does not register api", root.DisplayName())
+	}
+	for _, name := range []string{"method", "data"} {
+		if api.Flags().Lookup(name) == nil {
+			t.Errorf("%s api flag --%s is not registered", root.DisplayName(), name)
 		}
 	}
 }

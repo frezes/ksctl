@@ -151,15 +151,21 @@ func TestDispatchPluginLeavesMissingPluginToCobra(t *testing.T) {
 	}
 }
 
-func TestDefaultPluginHandlerExecutesForBothEntrypoints(t *testing.T) {
+func TestDefaultPluginHandlerExecutesForRootAndAlternateEntrypoints(t *testing.T) {
 	const helperEnvironment = "KSCTL_PLUGIN_HELPER_PROCESS"
 	if os.Getenv(helperEnvironment) == "1" {
 		arguments := []string{os.Getenv("KSCTL_PLUGIN_ARGV0"), "probe", "first", "--second=two"}
 		streams := IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}
 		var root *cobra.Command
 		var err error
-		if os.Getenv("KSCTL_PLUGIN_ENTRYPOINT") == "kubectl" {
-			root, err = NewKubectlPluginCommandWithArgs(streams, VersionInfo{Version: "test"}, arguments)
+		if os.Getenv("KSCTL_PLUGIN_ENTRYPOINT") == "alternate" {
+			root, err = NewEntrypointCommandWithArgs(
+				"fixture-entrypoint",
+				"fixture entrypoint",
+				streams,
+				VersionInfo{Version: "test"},
+				arguments,
+			)
 		} else {
 			root, err = NewRootCommandWithArgs(streams, VersionInfo{Version: "test"}, arguments)
 		}
@@ -184,9 +190,9 @@ func TestDefaultPluginHandlerExecutesForBothEntrypoints(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	for _, entrypoint := range []string{"ksctl", "kubectl"} {
+	for _, entrypoint := range []string{"ksctl", "alternate"} {
 		t.Run(entrypoint, func(t *testing.T) {
-			helper := exec.Command(os.Args[0], "-test.run=^TestDefaultPluginHandlerExecutesForBothEntrypoints$")
+			helper := exec.Command(os.Args[0], "-test.run=^TestDefaultPluginHandlerExecutesForRootAndAlternateEntrypoints$")
 			helper.Stdin = strings.NewReader("from-stdin\n")
 			helper.Env = []string{
 				helperEnvironment + "=1",

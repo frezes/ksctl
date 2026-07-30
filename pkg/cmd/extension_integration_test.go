@@ -85,7 +85,7 @@ func integrationNotFound(
 
 func executeIntegrationRoot(
 	t *testing.T,
-	kubectlPlugin bool,
+	alternateEntrypoint bool,
 	args ...string,
 ) (string, string, error) {
 	t.Helper()
@@ -100,8 +100,9 @@ func executeIntegrationRoot(
 		SetArgs([]string)
 		Execute() error
 	}
-	if kubectlPlugin {
-		command = NewKubectlPluginCommand(
+	if alternateEntrypoint {
+		command = newTestEntrypointCommand(
+			t,
 			streams,
 			VersionInfo{Version: "test"},
 		)
@@ -241,7 +242,7 @@ func TestExtensionIntegration(t *testing.T) {
 		assertHostOnlyExtensionRequests(t, dispatcher.paths())
 	})
 
-	t.Run("kubectl plugin status uses host", func(t *testing.T) {
+	t.Run("alternate entrypoint status uses host", func(t *testing.T) {
 		t.Setenv("KSCTL_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 		t.Setenv("KS_ENDPOINT", "")
 		t.Setenv("KS_TOKEN", "")

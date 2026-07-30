@@ -52,7 +52,7 @@ func TestNewCommandRegistersExtensionSurfaceWithoutLogs(t *testing.T) {
 }
 
 func TestNewCommandHelpUsesParentDisplayName(t *testing.T) {
-	for _, parent := range []string{"ksctl", "kubectl ks"} {
+	for _, parent := range []string{"ksctl", "fixture entrypoint"} {
 		t.Run(parent, func(t *testing.T) {
 			var output bytes.Buffer
 			root := &cobra.Command{

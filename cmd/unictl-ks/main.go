@@ -8,7 +8,9 @@ import (
 )
 
 func main() {
-	cmd, err := kscmd.NewKubectlPluginCommandWithArgs(
+	cmd, err := kscmd.NewEntrypointCommandWithArgs(
+		"unictl-ks",
+		"unictl ks",
 		kscmd.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr},
 		kscmd.DefaultVersionInfo(),
 		os.Args,
