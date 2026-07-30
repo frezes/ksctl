@@ -281,6 +281,11 @@ func TestKubeHelpOmitsExcludedOptionsHintAndUsesEntrypointDisplayName(t *testing
 			if strings.Contains(out.String(), "kube options") {
 				t.Fatalf("help advertises excluded options command: %s", out.String())
 			}
+			for _, flag := range []string{"--cluster", "--namespace", "--request-timeout"} {
+				if !strings.Contains(out.String(), flag) {
+					t.Errorf("help does not expose %s: %s", flag, out.String())
+				}
+			}
 		})
 	}
 }

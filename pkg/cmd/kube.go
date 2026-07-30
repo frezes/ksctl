@@ -168,7 +168,16 @@ func newKubeCommand(
 		},
 	}
 	groups.Add(command)
-	templates.ActsAsRootCommand(command, nil, groups...)
+	templates.ActsAsRootCommand(command, nil, groups...).ExposeFlags(
+		command,
+		"namespace",
+		"request-timeout",
+		"cluster",
+		"context",
+		"endpoint",
+		"token",
+		"v",
+	)
 	adaptNestedKubectlHelp(command, kubeDisplayName)
 	rewriteKubectlExamples(command, kubeDisplayName)
 	return command
