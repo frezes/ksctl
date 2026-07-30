@@ -13,9 +13,9 @@ builds:
     flags: [-trimpath]
     ldflags:
       - -s -w -X github.com/kubesphere/ksctl/pkg/cmd.version=v{{ .Version }}
-  - id: kubectl-ks
-    main: ./cmd/kubectl-ks
-    binary: kubectl-ks
+  - id: unictl-ks
+    main: ./cmd/unictl-ks
+    binary: unictl-ks
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin]
@@ -29,10 +29,10 @@ archives:
     ids: [ksctl]
     formats: [tar.gz]
     name_template: ksctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-  - id: kubectl-ks
-    ids: [kubectl-ks]
+  - id: unictl-ks
+    ids: [unictl-ks]
     formats: [tar.gz]
-    name_template: kubectl-ks_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    name_template: unictl-ks_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
 checksum:
   name_template: checksums.txt
