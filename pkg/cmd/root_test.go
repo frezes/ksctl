@@ -191,8 +191,8 @@ func TestRootHelpUsesEnglishRegardlessOfLocale(t *testing.T) {
 		}
 		help := out.String()
 		for _, want := range []string{
-			"describe    Show details of a specific resource or group of resources",
-			"get         Display one or many resources",
+			"Show details of a specific resource or group of resources",
+			"Display one or many resources",
 		} {
 			if !strings.Contains(help, want) {
 				t.Fatalf("help does not contain %q: %s", want, help)

@@ -3,10 +3,43 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	"k8s.io/kubectl/pkg/cmd/annotate"
+	"k8s.io/kubectl/pkg/cmd/apiresources"
+	"k8s.io/kubectl/pkg/cmd/apply"
+	"k8s.io/kubectl/pkg/cmd/attach"
+	kubectlauth "k8s.io/kubectl/pkg/cmd/auth"
+	"k8s.io/kubectl/pkg/cmd/autoscale"
+	"k8s.io/kubectl/pkg/cmd/certificates"
+	"k8s.io/kubectl/pkg/cmd/clusterinfo"
+	"k8s.io/kubectl/pkg/cmd/cp"
+	"k8s.io/kubectl/pkg/cmd/create"
+	"k8s.io/kubectl/pkg/cmd/debug"
+	deletecmd "k8s.io/kubectl/pkg/cmd/delete"
 	describecmd "k8s.io/kubectl/pkg/cmd/describe"
+	"k8s.io/kubectl/pkg/cmd/diff"
+	"k8s.io/kubectl/pkg/cmd/drain"
+	"k8s.io/kubectl/pkg/cmd/edit"
+	"k8s.io/kubectl/pkg/cmd/events"
+	cmdexec "k8s.io/kubectl/pkg/cmd/exec"
+	"k8s.io/kubectl/pkg/cmd/explain"
+	"k8s.io/kubectl/pkg/cmd/expose"
 	getcmd "k8s.io/kubectl/pkg/cmd/get"
+	"k8s.io/kubectl/pkg/cmd/kustomize"
+	"k8s.io/kubectl/pkg/cmd/label"
 	logscmd "k8s.io/kubectl/pkg/cmd/logs"
+	"k8s.io/kubectl/pkg/cmd/patch"
+	"k8s.io/kubectl/pkg/cmd/portforward"
+	"k8s.io/kubectl/pkg/cmd/proxy"
+	"k8s.io/kubectl/pkg/cmd/replace"
+	"k8s.io/kubectl/pkg/cmd/rollout"
+	"k8s.io/kubectl/pkg/cmd/run"
+	"k8s.io/kubectl/pkg/cmd/scale"
+	"k8s.io/kubectl/pkg/cmd/set"
+	"k8s.io/kubectl/pkg/cmd/taint"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/cmd/wait"
+	utilcomp "k8s.io/kubectl/pkg/util/completion"
+	"k8s.io/kubectl/pkg/util/templates"
 )
 
 func newKubeCommand(
@@ -36,12 +69,94 @@ func newKubeCommand(
 		"0",
 		"The length of time to wait before giving up on a single server request",
 	)
-	command.AddCommand(
-		getcmd.NewCmdGet(kubeDisplayName, factory, streams),
-		describecmd.NewCmdDescribe(kubeDisplayName, factory, streams),
-		logscmd.NewCmdLogs(factory, streams),
-		newKubeTopCommand(factory, streams),
-	)
+
+	getCommand := getcmd.NewCmdGet(kubeDisplayName, factory, streams)
+	getCommand.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(factory)
+	debugCommand := debug.NewCmdDebug(factory, streams)
+	debugCommand.ValidArgsFunction = utilcomp.ResourceTypeAndNameCompletionFunc(factory)
+
+	groups := templates.CommandGroups{
+		{
+			Message: "Basic Commands (Beginner):",
+			Commands: []*cobra.Command{
+				create.NewCmdCreate(factory, streams),
+				expose.NewCmdExposeService(factory, streams),
+				run.NewCmdRun(factory, streams),
+				set.NewCmdSet(factory, streams),
+			},
+		},
+		{
+			Message: "Basic Commands (Intermediate):",
+			Commands: []*cobra.Command{
+				explain.NewCmdExplain(kubeDisplayName, factory, streams),
+				getCommand,
+				edit.NewCmdEdit(factory, streams),
+				deletecmd.NewCmdDelete(factory, streams),
+			},
+		},
+		{
+			Message: "Deploy Commands:",
+			Commands: []*cobra.Command{
+				rollout.NewCmdRollout(kubeDisplayName, factory, streams),
+				scale.NewCmdScale(factory, streams),
+				autoscale.NewCmdAutoscale(factory, streams),
+			},
+		},
+		{
+			Message: "Cluster Management Commands:",
+			Commands: []*cobra.Command{
+				certificates.NewCmdCertificate(factory, streams),
+				clusterinfo.NewCmdClusterInfo(factory, streams),
+				newKubeTopCommand(factory, streams),
+				drain.NewCmdCordon(factory, streams),
+				drain.NewCmdUncordon(factory, streams),
+				drain.NewCmdDrain(factory, streams),
+				taint.NewCmdTaint(factory, streams),
+			},
+		},
+		{
+			Message: "Troubleshooting and Debugging Commands:",
+			Commands: []*cobra.Command{
+				describecmd.NewCmdDescribe(kubeDisplayName, factory, streams),
+				logscmd.NewCmdLogs(factory, streams),
+				attach.NewCmdAttach(factory, streams),
+				cmdexec.NewCmdExec(factory, streams),
+				portforward.NewCmdPortForward(factory, streams),
+				proxy.NewCmdProxy(factory, streams),
+				cp.NewCmdCp(factory, streams),
+				kubectlauth.NewCmdAuth(factory, streams),
+				debugCommand,
+				events.NewCmdEvents(factory, streams),
+			},
+		},
+		{
+			Message: "Advanced Commands:",
+			Commands: []*cobra.Command{
+				diff.NewCmdDiff(factory, streams),
+				apply.NewCmdApply(kubeDisplayName, factory, streams),
+				patch.NewCmdPatch(factory, streams),
+				replace.NewCmdReplace(factory, streams),
+				wait.NewCmdWait(factory, streams),
+				kustomize.NewCmdKustomize(streams),
+			},
+		},
+		{
+			Message: "Settings Commands:",
+			Commands: []*cobra.Command{
+				label.NewCmdLabel(factory, streams),
+				annotate.NewCmdAnnotate(kubeDisplayName, factory, streams),
+			},
+		},
+		{
+			Message: "Discovery Commands:",
+			Commands: []*cobra.Command{
+				apiresources.NewCmdAPIVersions(factory, streams),
+				apiresources.NewCmdAPIResources(factory, streams),
+			},
+		},
+	}
+	groups.Add(command)
+	templates.ActsAsRootCommand(command, nil, groups...)
 	rewriteKubectlExamples(command, kubeDisplayName)
 	return command
 }
