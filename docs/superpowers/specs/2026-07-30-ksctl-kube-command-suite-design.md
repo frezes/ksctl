@@ -395,7 +395,7 @@ Update:
 - `docs/cli_zh.md`
 - `docs/design.md`
 - `docs/design_zh.md`
-- `CHANGELOG.md`
+- `CHANGELOG.md` under `[Unreleased]` only
 
 The documentation:
 
@@ -410,3 +410,9 @@ The documentation:
   read-only; and
 - calls out the immediate removal of root describe, logs, and top as a
   breaking change.
+
+The implementation must not edit the already published `[0.2.0]` changelog
+entry. The breaking-change notice remains under `[Unreleased]` until the next
+release moves it into that new version. The same notice belongs in the next
+release notes and migration documentation; removed commands do not gain
+runtime forwarding or compatibility warnings.
