@@ -7,7 +7,6 @@ LDFLAGS := -s -w -X github.com/kubesphere/ksctl/pkg/cmd.version=$(VERSION)
 build:
 	@mkdir -p bin
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/ksctl ./cmd/ksctl
-	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/kubectl-ks ./cmd/kubectl-ks
 
 test:
 	$(GO) test ./... -count=1
@@ -27,4 +26,4 @@ verify: fmt-check mod-check
 	$(MAKE) build
 
 clean:
-	rm -f bin/ksctl bin/kubectl-ks
+	rm -f bin/ksctl

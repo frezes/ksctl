@@ -1,9 +1,7 @@
 # KubeSphere CLI (ksctl)
 
 `ksctl` is a command-line client for inspecting KubeSphere 4.x resources and
-the Kubernetes resources exposed through KubeSphere. Use it as the standalone
-`ksctl` command or install `kubectl-ks` and invoke the same command tree as
-`kubectl ks`.
+the Kubernetes resources exposed through KubeSphere.
 
 ## Features
 
@@ -20,9 +18,8 @@ The built-in resource commands are read-only.
 
 ## Install a release
 
-Release archives are available for Linux and macOS on amd64 and arm64. Choose
-the standalone `ksctl_VERSION_OS_ARCH.tar.gz` archive or the kubectl plugin
-`kubectl-ks_VERSION_OS_ARCH.tar.gz` archive from the GitHub Release.
+Release archives are available for Linux and macOS on amd64 and arm64. Download
+the matching `ksctl_VERSION_OS_ARCH.tar.gz` archive from the GitHub Release.
 
 For example, install the macOS arm64 standalone binary:
 
@@ -36,13 +33,11 @@ tar -xzf "${archive}"
 sudo install -m 0755 ksctl /usr/local/bin/ksctl
 ```
 
-On Linux, verify with `sha256sum -c -` instead of `shasum -a 256 -c -`. To
-install the kubectl plugin, download the matching `kubectl-ks` archive and put
-the extracted `kubectl-ks` executable on `PATH`.
+On Linux, verify with `sha256sum -c -` instead of `shasum -a 256 -c -`.
 
 ## Build from source
 
-Go 1.26 or later is required. Build both entrypoints into `bin/`:
+Go 1.26 or later is required. Build `ksctl` into `bin/`:
 
 ```bash
 make build
@@ -84,8 +79,8 @@ make verify
 make clean
 ```
 
-- `build` creates `bin/ksctl` and `bin/kubectl-ks`.
+- `build` creates `bin/ksctl`.
 - `test` runs all Go tests once.
 - `verify` checks formatting and modules, then runs vet, normal tests, race
-  tests, and both builds.
-- `clean` removes the generated binaries.
+  tests, and the `ksctl` build.
+- `clean` removes the generated binary.

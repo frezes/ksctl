@@ -16,8 +16,6 @@ are not the current architecture reference.
 - Support interactive use and explicit, predictable automation.
 - Use the KubeSphere API Endpoint and credentials without reading or changing
   the user's kubeconfig.
-- Expose identical built-in behavior through the standalone `ksctl` binary and
-  the `kubectl ks` plugin entrypoint.
 - Keep configuration, authentication, API clients, and command wiring in
   focused packages with testable boundaries.
 
@@ -40,16 +38,13 @@ user's authority.
 
 ## Command architecture
 
-There are two small executable entrypoints:
+The executable entry point is intentionally small:
 
 ```text
-cmd/ksctl/main.go       -> NewRootCommandWithArgs
-cmd/kubectl-ks/main.go  -> NewKubectlPluginCommandWithArgs
+cmd/ksctl/main.go -> NewRootCommandWithArgs
 ```
 
-Both constructors delegate to the same root-command builder in `pkg/cmd`.
-`kubectl-ks` adds Cobra's display-name annotation so help, examples, and errors
-show `kubectl ks`; command behavior and options otherwise remain shared.
+The constructor delegates to the shared root-command builder in `pkg/cmd`.
 
 The root owns KubeSphere connection flags and constructs these command groups:
 
@@ -58,13 +53,13 @@ The root owns KubeSphere connection flags and constructs these command groups:
 - kubectl-owned `get`, `describe`, `logs`, and `top` commands; and
 - Cobra-provided help, completion, and shell-completion commands.
 
-Commands use injected input, output, and error streams. The executable
-entrypoints connect those streams to the process standard streams and print a
+Commands use injected input, output, and error streams. The executable entry
+point connects those streams to the process standard streams and prints a
 single returned error before exiting non-zero. The root enables
 `SilenceUsage` and `SilenceErrors` so execution failures do not also print
 usage or duplicate the error.
 
-Before Cobra executes an unknown command, the `WithArgs` constructors give the
+Before Cobra executes an unknown command, the `WithArgs` constructor gives the
 plugin dispatcher an opportunity to resolve it to a `ksctl-*` executable.
 
 ## Resource command pipeline
@@ -90,7 +85,7 @@ replaces top's raw Clientset DiscoveryClient with
 fallback without forking top behavior.
 
 A recursive example normalizer changes upstream `kubectl` examples to the
-active `ksctl` or `kubectl ks` display name.
+active command display name.
 
 This delegates resource arguments, selectors, filename inputs, pagination,
 watching, table negotiation, printers, built-in Describers, generic describe
@@ -514,7 +509,7 @@ interfaces evolve together.
 
 The architecture is protected at several levels:
 
-- command tests verify both display names, registered commands and flags,
+- command tests verify display-name propagation, registered commands and flags,
   version behavior, resource requests, member-Cluster routing, recursive
   logs/top examples, log subresource streaming, Metrics/Core requests, and
   Metrics API discovery fallback;
@@ -528,8 +523,8 @@ The architecture is protected at several levels:
 - KubeSphere connection tests verify native configuration, username resolution,
   Cluster validation, and injected transport ownership;
 - plugin tests verify longest matching, argument forwarding, dash conversion,
-  built-in protection, PATH diagnostics, and both entrypoints; and
-- the build compiles both `cmd/ksctl` and `cmd/kubectl-ks`.
+  built-in protection, and PATH diagnostics; and
+- the normal build compiles `cmd/ksctl`.
 
 User-visible command, configuration, authentication, or plugin changes must
 update the [CLI guide](cli.md). Changes to package boundaries, routing,
