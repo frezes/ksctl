@@ -1,5 +1,7 @@
 # ksctl Design
 
+**English** | [简体中文](design_zh.md)
+
 This document describes the current architecture of ksctl. For command syntax
 and workflows, see the [CLI guide](cli.md). Historical specifications under
 `docs/superpowers/` record individual decisions and implementation phases but
@@ -223,10 +225,10 @@ selected path, method, request body, and response destination.
 
 ## Extension management
 
-Extension management is the deliberate controlled-write exception to the
-otherwise read-only built-in resource surface. It owns only
-`kubesphere.io/v1alpha1` Extension, ExtensionVersion, and InstallPlan
-workflows; it does not expose generic mutation verbs.
+Extension management is the deliberate, purpose-built write workflow alongside
+the otherwise read-only kubectl-backed resource surface. It owns only
+`kubesphere.io/v1alpha1` Extension, ExtensionVersion, and InstallPlan workflows;
+it does not expose generic mutation verbs.
 
 Responsibilities are split at a narrow boundary:
 
