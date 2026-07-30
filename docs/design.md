@@ -11,8 +11,10 @@ are not the current architecture reference.
   resources, logs, and current metrics exposed through KubeSphere.
 - Preserve familiar kubectl `get`, `describe`, `logs`, and `top` syntax,
   discovery, selection, printing, streaming, and error behavior.
-- Keep the generic built-in resource surface read-only, with one explicit,
-  controlled extension-lifecycle exception.
+- Keep the kubectl-backed generic resource surface read-only. Purpose-built
+  Extension lifecycle commands provide controlled writes, while `api` is an
+  explicit low-level escape hatch that sends caller-selected KubeSphere API
+  requests.
 - Support interactive use and explicit, predictable automation.
 - Use the KubeSphere API Endpoint and credentials without reading or changing
   the user's kubeconfig.
@@ -21,8 +23,9 @@ are not the current architecture reference.
 
 ## Non-goals
 
-- Generic built-in create, update, edit, patch, delete, apply, or other
-  resource mutation commands outside the purpose-built extension workflow
+- Typed built-in create, update, edit, patch, delete, apply, or other generic
+  resource mutation commands. The raw `api` transport escape hatch is not a
+  typed resource-management workflow.
 - A local reimplementation or fork of kubectl resource parsing, printers,
   watchers, or Describers
 - Reading, merging, or writing `~/.kube/config`
@@ -48,8 +51,8 @@ The constructor delegates to the shared root-command builder in `pkg/cmd`.
 
 The root owns KubeSphere connection flags and constructs these command groups:
 
-- ksctl-owned `auth`, `config`, `extension`, `plugin`, `tenant`, and `version`
-  commands;
+- ksctl-owned `api`, `auth`, `config`, `extension`, `plugin`, `tenant`, and
+  `version` commands;
 - kubectl-owned `get`, `describe`, `logs`, and `top` commands; and
 - Cobra-provided help, completion, and shell-completion commands.
 
@@ -190,6 +193,33 @@ Cluster scope explicitly when its API supports it.
 `kubesphere.io/client-go/rest.TLSClientConfig`. OAuth and the KubeSphere
 connection getter both use it. The Kubernetes adapter remains separate because
 it targets the `k8s.io/client-go/rest` type.
+
+## Raw KubeSphere API requests
+
+The `api` command is a low-level authenticated transport escape hatch:
+
+```text
+ksctl api API_PATH [-X METHOD] [-d DATA]
+```
+
+`API_PATH` must be server-relative and begin with `/`. It may contain a query
+string, but absolute URLs and fragments are rejected. The command reuses
+ksctl's KubeSphere connection, credential, TLS, user-agent, and timeout
+resolution.
+
+The selected Cluster and a Context's `defaultCluster` do not rewrite the
+request path. A caller targeting a Cluster-scoped endpoint must include the
+complete `/clusters/<cluster>` prefix in `API_PATH`.
+
+`GET` is the default method. Supplying `--data` without an explicit method
+selects `POST`; an explicit `--method` always wins. Supplied data is sent as raw
+bytes with `Content-Type: application/json`.
+
+The response body is copied unchanged to stdout. For an HTTP error response,
+the command writes the received body and also returns an error. It performs no
+resource typing, lifecycle validation, response formatting, redaction, or
+write guard. The caller therefore owns the effects and disclosure risks of the
+selected path, method, request body, and response destination.
 
 ## Extension management
 
@@ -400,6 +430,10 @@ that accepts Cluster scope adds it through the KubeSphere request builder. For
 example, kubeconfig retrieval uses the base KubeSphere Endpoint and applies the
 selected Cluster to the request before calling the user kubeconfig API.
 
+The raw `api` command is excluded from automatic Cluster routing. It uses the
+caller-provided path unchanged, so a Cluster-scoped request must contain its
+own `/clusters/<cluster>` prefix.
+
 This boundary keeps command parsing independent of KubeSphere proxy topology:
 the client layer selects the effective route, and the server remains
 responsible for authenticating the KubeSphere Token and serving or proxying the
@@ -482,6 +516,9 @@ and their own flag and connection handling.
   compensates the Token cache write.
 - Generated kubeconfig and raw config output can contain credentials and must
   be protected by the caller.
+- Raw API requests may mutate server state, and their request or response
+  bodies may contain sensitive data. ksctl does not inspect, redact, or apply
+  Extension lifecycle safeguards to them.
 - Container logs are written to stdout and may contain application secrets;
   ksctl does not inspect or redact their content.
 - Plugins are not inspected or sandboxed. Trust in a plugin is equivalent to
@@ -522,6 +559,9 @@ The architecture is protected at several levels:
   path preservation, and RESTMapper behavior;
 - KubeSphere connection tests verify native configuration, username resolution,
   Cluster validation, and injected transport ownership;
+- raw API command tests verify path and method validation, body construction,
+  unchanged query and response bytes, the absence of automatic Cluster
+  routing, and HTTP-error body propagation;
 - plugin tests verify longest matching, argument forwarding, dash conversion,
   built-in protection, and PATH diagnostics; and
 - the normal build compiles `cmd/ksctl`.
