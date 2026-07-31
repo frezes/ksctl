@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -579,6 +581,132 @@ func TestRootTenantGetUsesContextDefaultClusterOnlyForNamespaces(t *testing.T) {
 	}
 	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+}
+
+func TestRootTenantArbitraryGetUsesResolvedCluster(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantCluster string
+	}{
+		{
+			name:        "context default cluster",
+			args:        []string{"tenant", "get", "pods", "-A", "-o", "json"},
+			wantCluster: "context-member",
+		},
+		{
+			name: "explicit cluster overrides context",
+			args: []string{
+				"--cluster", "flag-member",
+				"tenant", "get", "pods", "-A", "-o", "json",
+			},
+			wantCluster: "flag-member",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KS_ENDPOINT", "")
+			t.Setenv("KS_TOKEN", "")
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			t.Setenv("KSCTL_CONFIG", configPath)
+
+			var (
+				pathsMu sync.Mutex
+				paths   []string
+			)
+			server := httptest.NewServer(http.HandlerFunc(func(
+				w http.ResponseWriter,
+				request *http.Request,
+			) {
+				pathsMu.Lock()
+				paths = append(paths, request.URL.Path)
+				pathsMu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				clusterPrefix := "/clusters/" + test.wantCluster
+				switch request.URL.Path {
+				case clusterPrefix + "/api":
+					_, _ = io.WriteString(
+						w,
+						`{"kind":"APIVersions","apiVersion":"v1","versions":["v1"]}`,
+					)
+				case clusterPrefix + "/apis":
+					_, _ = io.WriteString(
+						w,
+						`{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`,
+					)
+				case clusterPrefix + "/api/v1":
+					_, _ = io.WriteString(w, `{
+						"kind":"APIResourceList",
+						"apiVersion":"v1",
+						"groupVersion":"v1",
+						"resources":[{
+							"name":"pods",
+							"singularName":"pod",
+							"namespaced":true,
+							"kind":"Pod",
+							"verbs":["get","list","watch"]
+						}]
+					}`)
+				case clusterPrefix + "/api/v1/pods":
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = io.WriteString(w, `{"kind":"Status","status":"Failure"}`)
+				case clusterPrefix +
+					"/kapis/tenant.kubesphere.io/v1beta1/namespaces":
+					_, _ = io.WriteString(
+						w,
+						`{"items":[{"metadata":{"name":"team-a"}}]}`,
+					)
+				case clusterPrefix + "/api/v1/namespaces/team-a/pods":
+					_, _ = io.WriteString(w, `{
+						"apiVersion":"v1",
+						"kind":"PodList",
+						"metadata":{"resourceVersion":"1"},
+						"items":[{
+							"apiVersion":"v1",
+							"kind":"Pod",
+							"metadata":{"namespace":"team-a","name":"pod-a"}
+						}]
+					}`)
+				default:
+					http.NotFound(w, request)
+				}
+			}))
+			defer server.Close()
+
+			saveKubeconfigTestConfig(
+				t,
+				configPath,
+				server.URL,
+				"alice",
+				"context-member",
+				"secret",
+			)
+			out := new(bytes.Buffer)
+			command := NewRootCommand(
+				IOStreams{Out: out, ErrOut: new(bytes.Buffer)},
+				VersionInfo{Version: "test"},
+			)
+			command.SetArgs(test.args)
+			if err := command.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if !strings.Contains(out.String(), `"name": "pod-a"`) {
+				t.Fatalf("output missing pod-a:\n%s", out.String())
+			}
+			pathsMu.Lock()
+			defer pathsMu.Unlock()
+			for _, want := range []string{
+				"/clusters/" + test.wantCluster +
+					"/kapis/tenant.kubesphere.io/v1beta1/namespaces",
+				"/clusters/" + test.wantCluster +
+					"/api/v1/namespaces/team-a/pods",
+			} {
+				if !slices.Contains(paths, want) {
+					t.Fatalf("paths = %v, want %q", paths, want)
+				}
+			}
+		})
 	}
 }
 

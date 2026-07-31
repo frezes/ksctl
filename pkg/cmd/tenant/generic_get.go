@@ -198,29 +198,41 @@ func validateGenericScope(
 		return err
 	}
 	for _, resourceName := range strings.Split(args[0], ",") {
-		resource, err := mapper.ResourceFor(schema.GroupVersionResource{
-			Resource: resourceName,
-		})
-		if err != nil {
-			return err
-		}
-		kind, err := mapper.KindFor(resource)
-		if err != nil {
-			return err
-		}
-		mapping, err := mapper.RESTMapping(kind.GroupKind(), resource.Version)
+		mapping, err := mappingForResourceArg(mapper, resourceName)
 		if err != nil {
 			return err
 		}
 		if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
 			return fmt.Errorf(
 				"resource %s is cluster-scoped and cannot be filtered by workspace %q",
-				resource.Resource,
+				mapping.Resource.Resource,
 				workspace,
 			)
 		}
 	}
 	return nil
+}
+
+func mappingForResourceArg(
+	mapper meta.RESTMapper,
+	resourceArg string,
+) (*meta.RESTMapping, error) {
+	fullySpecified, groupResource := schema.ParseResourceArg(resourceArg)
+	if fullySpecified != nil {
+		if kind, err := mapper.KindFor(*fullySpecified); err == nil {
+			if mapping, err := mapper.RESTMapping(
+				kind.GroupKind(),
+				kind.Version,
+			); err == nil {
+				return mapping, nil
+			}
+		}
+	}
+	kind, err := mapper.KindFor(groupResource.WithVersion(""))
+	if err != nil {
+		return nil, err
+	}
+	return mapper.RESTMapping(kind.GroupKind(), kind.Version)
 }
 
 type conditionalWriter struct {
