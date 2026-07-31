@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`cmd/ksctl` is the normal executable entry point. Shared CLI wiring lives in `pkg/cmd`; authentication, configuration, token caching, and API clients are separated under `pkg/auth`, `pkg/config`, `pkg/cache`, and `pkg/client`. Keep implementation details that are not reusable outside this module in `internal/` (currently `internal/securefile`). Tests sit beside the code they exercise as `*_test.go`. Design notes and implementation plans live in `docs/superpowers/`. The `staging/` tree contains pinned upstream KubeSphere and kubectl source snapshots; avoid broad edits there unless updating those dependencies intentionally.
+`cmd/ksctl` is the normal executable entry point. Shared CLI wiring lives in `pkg/cmd`; authentication, configuration, token caching, and API clients are separated under `pkg/auth`, `pkg/config`, `pkg/cache`, and `pkg/client`. KubeSphere-specific domain behavior lives under `pkg/kubesphere`, while domain-neutral secure file persistence lives in `pkg/securefile`. Keep reusable implementation packages under `pkg/` with focused responsibilities; do not recreate the top-level `internal/` tree. Tests sit beside the code they exercise as `*_test.go`. Design notes and implementation plans live in `docs/superpowers/`. The `staging/` tree contains pinned upstream KubeSphere and kubectl source snapshots; avoid broad edits there unless updating those dependencies intentionally.
 
 ## Build, Test, and Development Commands
 

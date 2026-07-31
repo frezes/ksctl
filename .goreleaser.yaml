@@ -12,7 +12,7 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X github.com/kubesphere/ksctl/pkg/cmd.version=v{{ .Version }}
+      - -s -w -X kubesphere.io/ksctl/pkg/cmd.version=v{{ .Version }}
   - id: unictl-ks
     main: ./cmd/unictl-ks
     binary: unictl-ks
@@ -22,7 +22,7 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X github.com/kubesphere/ksctl/pkg/cmd.version=v{{ .Version }}
+      - -s -w -X kubesphere.io/ksctl/pkg/cmd.version=v{{ .Version }}
 
 archives:
   - id: ksctl
