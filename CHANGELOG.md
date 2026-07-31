@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Allow tenant users to get arbitrary Kubernetes resources across accessible
+  Namespaces, including Workspace-scoped queries, while preserving native
+  kubectl behavior for Cluster administrators.
+
 ## [0.3.0] - 2026-07-31
 
 ### Added

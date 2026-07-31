@@ -12,7 +12,8 @@ and API workflows.
 - Use `kube` for nearly the full kubectl operation surface through KubeSphere
   authentication and member-Cluster routing.
 - Authenticate, switch saved Contexts, and target host or member Clusters.
-- Explore tenant Workspaces, Namespaces, and Clusters.
+- Explore tenant Workspaces, Namespaces, and Clusters, and read arbitrary
+  Kubernetes resources across the Namespaces accessible to the tenant.
 - Discover, install, configure, diagnose, and remove KubeSphere Extensions.
 - Send authenticated raw API requests and extend the CLI with `ksctl-*`
   executable plugins.
@@ -63,6 +64,7 @@ ksctl config current-context
 ksctl get pods -A
 ksctl kube apply -f app.yaml --cluster member-1
 ksctl tenant get workspace
+ksctl tenant get deployments --workspace platform
 ksctl extension list
 ksctl api /kapis/version
 ```
@@ -81,7 +83,7 @@ can change the selected Cluster.
 | `config` | Inspect and select Contexts or generate kubeconfig. |
 | `get` | Read Kubernetes and discovered KubeSphere resources. |
 | `kube` | Run nearly the full kubectl operation surface through KubeSphere. |
-| `tenant` | Inspect tenant Workspaces, Namespaces, and Clusters. |
+| `tenant` | Inspect tenant scope and read Kubernetes resources within it. |
 | `extension` | Discover and manage KubeSphere Extensions. |
 | `api` | Send an authenticated request to a KubeSphere API path. |
 | `plugin` | List `ksctl-*` executable plugins available on `PATH`. |
@@ -99,7 +101,7 @@ troubleshooting.
 | Context | Selects a saved KubeSphere connection and identity. |
 | Cluster | Selects the KubeSphere host or a member Cluster. |
 | Namespace | Selects a Kubernetes Namespace or KubeSphere Project for resource commands. |
-| Workspace | Filters tenant relationships inspected with `tenant get`. |
+| Workspace | Filters tenant relationships or arbitrary namespaced resources inspected with `tenant get`. |
 
 Use the global `--context` and, where supported, `--cluster` flags to override
 the saved scope for one command. Use `--endpoint` together with `--token` for a

@@ -55,16 +55,37 @@ Kubernetes 操作及其辅助请求共用同一个有效 Cluster 路由。Namesp
 
 ### 租户管线
 
-租户资源使用 KubeSphere 原生 API，而不使用通用 Kubernetes 发现管线。因此，
-即使存在同名 Kubernetes 资源，其作用域仍然明确。
+原生租户 Workspace、Namespace 和 Cluster 资源使用 KubeSphere API。其他
+`tenant get` 资源名称使用 kubectl `GetOptions`、资源发现和 RESTMapper，因此
+内置资源和 CRD 都能保留 kubectl 的选择器与输出格式。
 
 Workspace 和租户 Cluster 读取以 Fleet 为作用域，并忽略选中的资源 Cluster。
 Namespace 读取使用选中的 Cluster，因为 Namespace 的归属与 Cluster 相关。
 可选 Workspace 会缩小 Namespace 和租户 Cluster 集合的范围，但不会改变拥有
 该请求的控制平面。
 
-人类可读输出使用稳定的 kubectl 风格表格。结构化输出保留服务器响应，避免客户端
-丢失 ksctl 尚不了解的字段。
+任意资源请求经过支持聚合的 transport。管理员成功执行的全 Namespace 请求保持
+直接访问；符合条件的命名空间集合请求返回 `403` 后，或显式指定 Workspace 时，
+transport 会通过原生租户 API 解析可访问的 Namespace，分别处理各自分页，并以
+最多 8 个并发请求进行 fan-out。结果按 Namespace 顺序合并为一个 Kubernetes
+List 或 Table，再交给常规 kubectl printer：
+
+```text
+tenant generic get
+  -> kubectl GetOptions / discovery / RESTMapper
+  -> aggregation-aware transport
+     -> direct success，或
+     -> tenant Namespace resolution + bounded fan-out
+  -> merged List/Table
+  -> kubectl printer
+```
+
+该聚合 transport 只安装在 `tenant get` 上；顶层 `get`、`kube` 和固定的
+`staging/` 源码保持不变。所有 Namespace 都必须成功，完整结果可用前聚合输出会被
+缓冲。Workspace 作用域拒绝集群级资源，并且明确不支持租户跨 Namespace watch。
+
+原生租户的人类可读输出使用稳定的 kubectl 风格表格。结构化输出保留服务器响应，
+避免客户端丢失 ksctl 尚不了解的字段。
 
 ### 扩展组件管理
 

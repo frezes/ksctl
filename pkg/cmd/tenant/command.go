@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	kubesphererest "kubesphere.io/client-go/rest"
 	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
 )
@@ -16,7 +19,58 @@ type RESTClientGetter interface {
 	KubeSphereCluster() (string, error)
 }
 
+type CommandOptions struct {
+	DisplayName      string
+	KubeSphereGetter RESTClientGetter
+	KubernetesGetter genericclioptions.RESTClientGetter
+	Streams          genericiooptions.IOStreams
+	Namespace        *string
+}
+
 func NewCommand(getter RESTClientGetter) *cobra.Command {
+	return newNativeOnlyCommand(getter)
+}
+
+func NewCommandWithOptions(options CommandOptions) *cobra.Command {
+	if options.KubernetesGetter == nil {
+		return newNativeOnlyCommand(options.KubeSphereGetter)
+	}
+
+	command := &cobra.Command{
+		Use:   "tenant",
+		Short: "Inspect KubeSphere tenant resources",
+	}
+	displayName := options.DisplayName
+	if displayName == "" {
+		displayName = command.Name()
+	}
+	state := &aggregationState{}
+	resolver := newNamespaceResolver(options.KubeSphereGetter)
+	getter := newAggregatingRESTClientGetter(
+		options.KubernetesGetter,
+		resolver,
+		state,
+	)
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(getter))
+	get := newGenericGetCommand(
+		displayName+" tenant",
+		factory,
+		options.Streams,
+		options.Namespace,
+		state,
+	)
+	get.Flags().String("workspace", "", "KubeSphere workspace name")
+
+	var output string
+	for _, child := range newNativeGetCommands(options.KubeSphereGetter, &output) {
+		child.Flags().StringVarP(&output, "output", "o", "table", "Output format: table, json, or yaml")
+		get.AddCommand(child)
+	}
+	command.AddCommand(get)
+	return command
+}
+
+func newNativeOnlyCommand(getter RESTClientGetter) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "tenant",
 		Short: "Inspect KubeSphere tenant resources",
@@ -33,6 +87,12 @@ func NewCommand(getter RESTClientGetter) *cobra.Command {
 	var output string
 	get.PersistentFlags().StringVarP(&output, "output", "o", "table", "Output format: table, json, or yaml")
 
+	get.AddCommand(newNativeGetCommands(getter, &output)...)
+	command.AddCommand(get)
+	return command
+}
+
+func newNativeGetCommands(getter RESTClientGetter, output *string) []*cobra.Command {
 	workspace := &cobra.Command{
 		Use:     "workspace [NAME]",
 		Aliases: []string{"workspaces"},
@@ -46,7 +106,7 @@ func NewCommand(getter RESTClientGetter) *cobra.Command {
 			return runGet(cmd.Context(), cmd.OutOrStdout(), getter, Request{
 				Resource: ResourceWorkspace,
 				Name:     name,
-			}, output)
+			}, *output)
 		},
 	}
 
@@ -60,7 +120,7 @@ func NewCommand(getter RESTClientGetter) *cobra.Command {
 			return runGet(cmd.Context(), cmd.OutOrStdout(), getter, Request{
 				Resource:  ResourceNamespace,
 				Workspace: namespaceWorkspace,
-			}, output)
+			}, *output)
 		},
 	}
 	namespace.Flags().StringVar(&namespaceWorkspace, "workspace", "", "KubeSphere workspace name")
@@ -75,14 +135,12 @@ func NewCommand(getter RESTClientGetter) *cobra.Command {
 			return runGet(cmd.Context(), cmd.OutOrStdout(), getter, Request{
 				Resource:  ResourceCluster,
 				Workspace: clusterWorkspace,
-			}, output)
+			}, *output)
 		},
 	}
 	cluster.Flags().StringVar(&clusterWorkspace, "workspace", "", "KubeSphere workspace name")
 
-	get.AddCommand(workspace, namespace, cluster)
-	command.AddCommand(get)
-	return command
+	return []*cobra.Command{workspace, namespace, cluster}
 }
 
 func runGet(ctx context.Context, out io.Writer, getter RESTClientGetter, request Request, output string) error {

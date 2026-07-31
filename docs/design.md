@@ -66,9 +66,10 @@ aggregation is deliberately outside the command model.
 
 ### Tenant pipeline
 
-Tenant resources use KubeSphere-native APIs rather than the generic Kubernetes
-discovery pipeline. This makes their scope explicit even when similarly named
-Kubernetes resources exist.
+Native tenant Workspace, Namespace, and Cluster resources use KubeSphere APIs.
+Other `tenant get` resource names use kubectl `GetOptions`, discovery, and the
+RESTMapper, so built-in resources and CRDs retain kubectl selectors and output
+formats.
 
 Workspace and tenant Cluster reads are Fleet-scoped and ignore the selected
 resource Cluster. Namespace reads use the selected Cluster because Namespace
@@ -76,9 +77,33 @@ membership is Cluster-specific. An optional Workspace narrows Namespace and
 tenant Cluster collections without changing which control plane owns the
 request.
 
-Human-readable output uses stable kubectl-style tables. Structured output
-preserves the server response so clients do not lose fields that ksctl does not
-yet understand.
+Arbitrary resource requests pass through an aggregation-aware transport. A
+successful administrator all-Namespaces request remains direct. After an
+eligible namespaced collection returns `403`, or when Workspace scope is
+explicit, the transport resolves accessible Namespaces through the native
+tenant API, follows pagination independently, and fans out with at most eight
+concurrent requests. It merges results in Namespace order as one Kubernetes
+List or Table and then uses the normal kubectl printer:
+
+```text
+tenant generic get
+  -> kubectl GetOptions / discovery / RESTMapper
+  -> aggregation-aware transport
+     -> direct success, or
+     -> tenant Namespace resolution + bounded fan-out
+  -> merged List/Table
+  -> kubectl printer
+```
+
+The aggregation transport is installed only for `tenant get`; top-level
+`get`, `kube`, and the pinned `staging/` sources remain unchanged. Every
+Namespace must succeed, and aggregate output is buffered until the complete
+result is available. Workspace scope rejects cluster-scoped resources, while
+tenant multi-Namespace watch is deliberately unsupported.
+
+Native tenant human-readable output uses stable kubectl-style tables.
+Structured output preserves the server response so clients do not lose fields
+that ksctl does not yet understand.
 
 ### Extension management
 

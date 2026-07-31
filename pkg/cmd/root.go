@@ -89,6 +89,11 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 			IgnoreDefaultCluster: true,
 		},
 	)
+	kubeStreams := genericiooptions.IOStreams{
+		In:     streams.In,
+		Out:    streams.Out,
+		ErrOut: streams.ErrOut,
+	}
 
 	cmd.AddCommand(newVersionCommand(info, kubernetesGetter))
 	cmd.AddCommand(newConfigCommand(kubeSphereGetter))
@@ -100,14 +105,15 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 		extensionGetter,
 		kubeSphereFactory,
 	))
-	cmd.AddCommand(tenantcmd.NewCommand(kubeSphereGetter))
+	cmd.AddCommand(tenantcmd.NewCommandWithOptions(tenantcmd.CommandOptions{
+		DisplayName:      cmd.DisplayName(),
+		KubeSphereGetter: kubeSphereGetter,
+		KubernetesGetter: kubernetesGetter,
+		Streams:          kubeStreams,
+		Namespace:        &connection.Namespace,
+	}))
 
 	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(kubernetesGetter))
-	kubeStreams := genericiooptions.IOStreams{
-		In:     streams.In,
-		Out:    streams.Out,
-		ErrOut: streams.ErrOut,
-	}
 	cmd.AddCommand(plugincmd.NewCommand(cmd.DisplayName(), kubeStreams))
 	cmd.AddCommand(newRootGetCommand(
 		cmd.DisplayName(),
