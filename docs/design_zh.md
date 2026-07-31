@@ -7,29 +7,21 @@
 
 ## 设计目标与边界
 
-ksctl 通过一个命令行界面访问 KubeSphere 4.x 及经 KubeSphere 暴露的
-Kubernetes API。它保留上游 kubectl 操作行为，同时让各命令以一致的方式处理
-连接、认证和作用域选择。
+ksctl 通过一个命令行界面访问 KubeSphere 4.x，并经 KubeSphere 提供基本完整的
+kubectl 操作能力。它保留上游 kubectl 行为，同时让各命令以一致的方式处理连接、
+认证和作用域选择。
 
 命令界面具有四条不同的安全边界：
 
 - 顶层 `get` 和租户查看只执行读取操作；
-- 通用 Kubernetes 读取与变更位于 `kube` 下，并使用相同的 KubeSphere 认证和
-  Cluster 路由；
+- 通用 Kubernetes 操作位于 `kube` 下，并使用 KubeSphere 认证和 Cluster 路由；
 - 扩展组件生命周期命令提供专用且受控的写入操作；以及
-- `api` 是原始的认证逃生口，由调用者选择的请求可能变更服务器状态。
+- `api` 提供直接发送认证请求的底层入口，调用者选择的请求可能变更服务器状态。
 
 可执行插件在用户授权下作为独立程序运行，不受这些内置保护措施约束。
 
-以下内容仍不属于设计目标：
-
-- 在本地重新实现或 fork kubectl 操作行为
-- 读取、合并或写入 `~/.kube/config`
-- 在 `kube` 下提供 kubectl CLI 自管理命令
-- 成员 Cluster 操作失败后自动回退到 host Cluster
-- 跨 Cluster 聚合资源
-- 审计插件或为插件提供沙箱
-- 支持 KubeSphere 3.x
+ksctl 不将 kubeconfig 用作持久化配置模型，不跨 Cluster 聚合资源，不审计插件或
+为其提供沙箱，也不支持 KubeSphere 3.x。
 
 ## 整体架构
 
@@ -39,39 +31,10 @@ Endpoint、身份和可选 Cluster；随后由 KubeSphere 提供原生 API，或
 请求代理到该 Cluster。
 
 因此，命令不需要理解 KubeSphere 的代理拓扑。命令运行时解析有效连接，并在整个
-调用期间复用该结果，使发现、资源读取、辅助请求和错误报告使用一致的身份与
+调用期间复用该结果，使 Kubernetes 操作、辅助请求和错误报告使用一致的身份与
 作用域。
 
 ## 核心设计
-
-### Kubernetes 命令装配
-
-根命令构造一个 ksctl Kubernetes `RESTClientGetter` 和一个共享 kubectl
-Factory。顶层 `get` 与 `kube get` 是连接到该 Factory 的两个独立上游 get
-构造器实例。`kube` 装配 kubectl v0.36.2 导出的操作构造器，而不包装 kubectl
-顶层命令：
-
-```text
-ksctl kube COMMAND
-  -> upstream kubectl v0.36.2 command/options
-  -> shared kubectl Factory
-  -> ksctl Kubernetes RESTClientGetter
-  -> discovery/RESTMapper/client as required
-  -> KubeSphere Endpoint or /clusters/<cluster>
-  -> Kubernetes API
-```
-
-装配器跟踪上游 v0.36.2 操作列表，同时明确排除 `config`、`plugin`、
-`version`、`completion`、`options`、`kuberc` 和空的 `alpha`。这样可以防止
-经 KubeSphere 认证的命令树静默获得 kubeconfig 或 kubectl CLI 自管理行为。
-
-`kube` 父命令持久定义 `--namespace` 和 `--request-timeout`。ksctl 根命令定义
-`--cluster`，它由每个 `kube` 操作继承，并限定其所有远程 Kubernetes 请求。
-
-`exec`、`attach`、`cp`、`port-forward` 和 `proxy` 等升级传输命令通过已路由的
-REST 配置保留上游 SPDY、WebSocket 和 HTTP Upgrade 行为。`top` 是唯一的窄行为
-适配：上游选项完成后，ksctl 用共享 Factory 的 DiscoveryClient 替换其
-DiscoveryClient，使成员 Cluster 的发现回退保持一致。
 
 ### 跨集群资源访问
 
@@ -79,15 +42,16 @@ Context 提供默认 Fleet、User 和可选 Cluster。显式连接值或作用�
 调用中覆盖这些默认值。选中 Cluster 时，Kubernetes 发现和资源请求经 KubeSphere
 访问该 Cluster；否则直接使用 Fleet Endpoint。
 
-发现、读取、变更、流式传输和指标请求共用同一个有效 Cluster 路由。Namespace
-只缩小命名空间资源请求的范围，不负责选择 Cluster。这样既能使命令语法独立于
-路由，也能避免同一命令内的不同辅助请求偏移到其他目标。
+Kubernetes 操作及其辅助请求共用同一个有效 Cluster 路由。Namespace 只缩小
+命名空间资源请求的范围，不负责选择 Cluster。这样既能使命令语法独立于路由，
+也能避免同一操作内的不同请求偏移到其他目标。
 
 某些 KubeSphere 部署即使聚合发现不完整，也会暴露各个发现端点。ksctl 可以根据
 服务器实际暴露的能力（包括已注册的扩展 API）恢复聚合视图，而无需维护静态的
 公共资源列表。
 
-每条资源命令只查询一个选中的 Cluster。跨 Cluster 聚合明确不属于命令模型。
+每个 Kubernetes 操作只查询一个选中的 Cluster。跨 Cluster 聚合明确不属于命令
+模型。
 
 ### 租户管线
 
@@ -153,10 +117,9 @@ Config。
 
 ## 安全与兼容性
 
-顶层 `get` 和租户查看不会变更资源。`kube` 是通用 Kubernetes 管理界面：
-`apply`、`delete`、`drain`、`debug` 和 `rollout` 等命令可能变更选中的
-Cluster，并由解析出的 KubeSphere 凭据所具备的 Kubernetes RBAC 权限授权。
-ksctl 不增加确认步骤，也不会在成员 Cluster 请求失败后改为操作 host Cluster。
+顶层 `get` 和租户查看不会变更资源。`kube` 可能变更选中的 Cluster，并由解析出的
+KubeSphere 凭据所具备的 Kubernetes RBAC 权限授权。它不使用本地 kubeconfig，
+也不会在成员 Cluster 操作失败后改为操作 host Cluster。
 
 交互式 Password 输入不会回显，登录也不会持久化提供的 Password。Config 和
 Token 缓存更新使用受限权限和原子替换。手动放入 Config 的 Password 仍为明文，
@@ -169,5 +132,5 @@ ksctl 不检查或脱敏这些输出；调用者负责其目标位置和生命�
 状态，插件则以用户权限和继承的环境运行。两者都不具备扩展组件命令界面的
 生命周期保护。
 
-ksctl 支持 KubeSphere 4.x。相互对齐的 Kubernetes 依赖必须一起升级，因为资源
-发现、映射、打印、流式传输和 kubectl 兼容命令行为共同构成一个集成面。
+ksctl 支持 KubeSphere 4.x，并将上游 Kubernetes 兼容性作为一个整体集成面进行
+跟踪。
