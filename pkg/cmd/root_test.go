@@ -515,6 +515,17 @@ func TestRootRegistersTenantGetCommands(t *testing.T) {
 			t.Fatalf("tenant get %s command is not registered", name)
 		}
 	}
+	for _, name := range []string{"all-namespaces", "selector", "field-selector", "output", "workspace", "namespace"} {
+		if get.Flags().Lookup(name) == nil {
+			t.Fatalf("tenant get flag --%s is not registered", name)
+		}
+	}
+	if findSubcommand(root, "get").Flags().Lookup("workspace") != nil {
+		t.Fatal("top-level get unexpectedly has --workspace")
+	}
+	if findSubcommand(findSubcommand(root, "kube"), "get").Flags().Lookup("workspace") != nil {
+		t.Fatal("kube get unexpectedly has --workspace")
+	}
 }
 
 func TestRootTenantGetUsesContextDefaultClusterOnlyForNamespaces(t *testing.T) {

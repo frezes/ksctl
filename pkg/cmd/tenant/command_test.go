@@ -3,14 +3,56 @@ package tenant
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	kubesphererest "kubesphere.io/client-go/rest"
 )
+
+func TestCommandKeepsNativeResourcesAheadOfGenericGet(t *testing.T) {
+	namespace := ""
+	command := NewCommandWithOptions(CommandOptions{
+		DisplayName:      "ksctl",
+		KubeSphereGetter: fakeRESTClientGetter{},
+		KubernetesGetter: fakeKubernetesRESTClientGetter{},
+		Streams: genericiooptions.IOStreams{
+			Out:    io.Discard,
+			ErrOut: io.Discard,
+		},
+		Namespace: &namespace,
+	})
+
+	get := findCommand(command, "get")
+	if get == nil {
+		t.Fatal("get command is missing")
+	}
+	for _, name := range []string{"workspace", "namespace", "cluster"} {
+		if findCommand(get, name) == nil {
+			t.Fatalf("native child %q is missing", name)
+		}
+	}
+	for _, name := range []string{
+		"all-namespaces",
+		"selector",
+		"field-selector",
+		"output",
+		"workspace",
+		"namespace",
+	} {
+		if get.Flags().Lookup(name) == nil {
+			t.Fatalf("generic get flag --%s is missing", name)
+		}
+	}
+}
 
 func TestCommandRoutesResourcesAndAliases(t *testing.T) {
 	tests := []struct {
@@ -165,6 +207,24 @@ type fakeRESTClientGetter struct {
 	config  *kubesphererest.Config
 	cluster string
 	err     error
+}
+
+type fakeKubernetesRESTClientGetter struct{}
+
+func (fakeKubernetesRESTClientGetter) ToRESTConfig() (*rest.Config, error) {
+	return nil, nil
+}
+
+func (fakeKubernetesRESTClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
+	return nil, nil
+}
+
+func (fakeKubernetesRESTClientGetter) ToRESTMapper() (meta.RESTMapper, error) {
+	return nil, nil
+}
+
+func (fakeKubernetesRESTClientGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
+	return nil
 }
 
 func (g fakeRESTClientGetter) ToRESTConfig() (*kubesphererest.Config, error) {
