@@ -29,7 +29,7 @@ Download the matching `ksctl_VERSION_OS_ARCH.tar.gz` archive from
 For example, install the macOS arm64 binary:
 
 ```bash
-version=v0.2.0
+version=v0.3.0
 archive="ksctl_${version#v}_darwin_arm64.tar.gz"
 curl -LO "https://github.com/frezes/ksctl/releases/download/${version}/${archive}"
 curl -LO "https://github.com/frezes/ksctl/releases/download/${version}/checksums.txt"

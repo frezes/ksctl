@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-31
+
 ### Added
 
 - Add the `kube` command suite with kubectl-compatible Kubernetes reads,
@@ -20,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paths.
 - **Breaking:** Move `--request-timeout` from the ksctl root to the `kube`
   command group.
+- **Breaking:** Change the Go module path from `github.com/kubesphere/ksctl`
+  to `kubesphere.io/ksctl`.
+- Reorganize reusable KubeSphere client, Extension, and secure-file behavior
+  under focused public `pkg/` packages.
+
+### Fixed
+
+- Fix nested `kube` command help and expose connection flags consistently.
+- Preserve upgraded transport configuration for `kube` requests.
+- Stabilize request-timeout coverage.
+
+### Documentation
+
+- Refocus the English and Chinese CLI guides on ksctl workflows and simplify
+  the Kubernetes architecture documentation.
 
 ## [0.2.0] - 2026-07-30
 
@@ -71,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove the non-functional `--workspace` flag.
 - Keep Go module metadata tidy and reproducible.
 
-[Unreleased]: https://github.com/frezes/ksctl/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/frezes/ksctl/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/frezes/ksctl/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/frezes/ksctl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/frezes/ksctl/releases/tag/v0.1.0
