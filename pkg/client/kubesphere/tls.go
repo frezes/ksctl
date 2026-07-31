@@ -1,4 +1,4 @@
-package kubesphererest
+package kubesphere
 
 import (
 	"github.com/kubesphere/ksctl/pkg/config"

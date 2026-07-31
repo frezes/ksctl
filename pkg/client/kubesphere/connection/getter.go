@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	internalrest "github.com/kubesphere/ksctl/internal/kubesphererest"
 	"github.com/kubesphere/ksctl/pkg/auth"
 	clientoptions "github.com/kubesphere/ksctl/pkg/client"
+	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	"github.com/kubesphere/ksctl/pkg/config"
 	kubesphererest "kubesphere.io/client-go/rest"
 )
@@ -171,7 +171,10 @@ func (g *RESTClientGetter) loadConfig() {
 		if g.transport != nil {
 			g.restConfig.Transport = g.transport
 		} else {
-			g.restConfig.TLSClientConfig = internalrest.TLSClientConfig(g.resolved.TLSClientConfig, g.options.InsecureSkipTLSVerify)
+			g.restConfig.TLSClientConfig = clientkubesphere.TLSClientConfig(
+				g.resolved.TLSClientConfig,
+				g.options.InsecureSkipTLSVerify,
+			)
 		}
 	})
 }

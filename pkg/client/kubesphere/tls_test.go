@@ -1,4 +1,4 @@
-package kubesphererest
+package kubesphere
 
 import (
 	"reflect"
