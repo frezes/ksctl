@@ -256,18 +256,17 @@ returns a scope error before issuing the resource request.
 
 `--workspace` with `--watch` or `--watch-only` is rejected before any request.
 
-For `-A --watch` or `-A --watch-only`, the command uses the KubeSphere
-v1beta1 self-subject access review endpoint to check cluster-scope
-`list namespaces` permission before kubectl produces an initial list:
+For `-A --watch` or `-A --watch-only`, the native request proceeds unchanged.
+If it succeeds, an administrator receives kubectl's native watch. If the
+request is forbidden, the aggregation transport reports that tenant
+multi-Namespace watch is unsupported instead of starting fan-out.
 
-```text
-/kapis/iam.kubesphere.io/v1beta1/selfsubjectaccessreviews
-```
-
-If allowed, kubectl's native all-Namespaces watch proceeds. If not allowed,
-the command reports that tenant multi-Namespace watch is unsupported. This
-preflight prevents a tenant list fallback from printing initial objects before
-a later watch request fails.
+The command's conditional output buffer switches on as soon as a forbidden
+request activates tenant fallback. Therefore, if kubectl performs an initial
+list before its watch request, those initial objects remain buffered and are
+discarded when the tenant watch is rejected. This avoids a separate
+role-name or access-review heuristic and bases the decision on permission for
+the resource actually requested.
 
 ## Fan-Out and Pagination
 
@@ -320,8 +319,10 @@ For server-print responses:
 - every response must be a `meta.k8s.io` Table;
 - column definitions must be identical;
 - rows are appended in deterministic Namespace order; and
-- the row objects remain present when requested so kubectl can render the
-  Namespace column and client-side behaviors correctly.
+- existing row objects remain present; and
+- when a server omits a row object, the transport adds minimal object metadata
+  containing that row's Namespace so kubectl can render the `NAMESPACE`
+  column correctly.
 
 Different column definitions are an error rather than a silently malformed
 table.
@@ -339,7 +340,8 @@ requests preserve kubectl's normal output behavior. Once tenant aggregation is
 activated, stdout and informational stderr are committed only if the complete
 kubectl run succeeds.
 
-Any of the following fails the aggregate without printing partial results:
+Any of the following fails the aggregate without committing buffered resource
+output:
 
 - tenant Namespace resolution failure;
 - malformed tenant response;
@@ -350,8 +352,12 @@ Any of the following fails the aggregate without printing partial results:
 - malformed Kubernetes JSON;
 - non-list response;
 - mismatched list type or Table columns;
-- context cancellation or timeout; or
-- final output write failure.
+- context cancellation or timeout.
+
+After a successful aggregate, failure while copying the completed buffer to
+the caller's output writer is returned with context. As with kubectl and Go's
+`io.Writer` contract, a writer may accept a prefix before returning an error;
+ksctl cannot retract bytes already accepted by an external writer.
 
 Errors add the failing Namespace and resource where known, preserve the
 underlying error, and never include bearer tokens or other credentials.
@@ -460,7 +466,7 @@ Implementation follows test-driven development.
 - Workspace/Namespace/all-Namespaces conflicts fail before requests.
 - Workspace with raw, filename, named, root-scoped, or watch queries fails with
   an actionable error.
-- A tenant `-A --watch` denial fails before initial resource output.
+- A tenant `-A --watch` denial discards any buffered initial resource output.
 - An administrator `-A --watch` uses native kubectl behavior.
 
 Final verification runs:
