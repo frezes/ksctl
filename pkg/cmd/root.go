@@ -71,7 +71,6 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 	cmd.PersistentFlags().StringVar(&connection.Token, "token", "", "KubeSphere bearer token")
 	cmd.PersistentFlags().StringVar(&connection.Context, "context", "", "ksctl context name")
 	cmd.PersistentFlags().StringVar(&connection.Cluster, "cluster", "", "KubeSphere cluster name")
-	cmd.PersistentFlags().StringVar(&connection.RequestTimeout, "request-timeout", "0", "The length of time to wait before giving up on a single server request")
 	addKlogVerbosityFlag(cmd, streams.ErrOut)
 
 	kubeSphereFactory := clientkubesphere.NewRESTClientFactory(nil)
@@ -103,19 +102,26 @@ func newRootCommand(use, displayName string, streams IOStreams, info VersionInfo
 	))
 	cmd.AddCommand(tenantcmd.NewCommand(kubeSphereGetter))
 
-	factory := cmdutil.NewFactory(kubernetesGetter)
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(kubernetesGetter))
 	kubeStreams := genericiooptions.IOStreams{
 		In:     streams.In,
 		Out:    streams.Out,
 		ErrOut: streams.ErrOut,
 	}
 	cmd.AddCommand(plugincmd.NewCommand(cmd.DisplayName(), kubeStreams))
-	cmd.AddCommand(newResourceCommands(
+	cmd.AddCommand(newRootGetCommand(
 		cmd.DisplayName(),
 		factory,
 		kubeStreams,
 		&connection.Namespace,
-	)...)
+	))
+	cmd.AddCommand(newKubeCommand(
+		cmd.DisplayName(),
+		factory,
+		kubeStreams,
+		&connection.Namespace,
+		&connection.RequestTimeout,
+	))
 
 	return cmd
 }

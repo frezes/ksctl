@@ -4,9 +4,14 @@
 
 ## 简介
 
-`ksctl` 是 KubeSphere 4.x 的命令行客户端。它连接到 KubeSphere API 端点，用于查看资源和管理 KubeSphere 扩展组件。兼容 kubectl 的资源命令支持通过 `--cluster` 跨集群查看资源；租户命令用于查看当前租户可访问的资源在 Workspace、Namespace 和 Cluster 中的分布。
+`ksctl` 是 KubeSphere 4.x 的命令行客户端。它连接到 KubeSphere API
+端点，用于查看资源和管理 KubeSphere 扩展组件。`kube` 命令集通过
+KubeSphere 认证提供兼容 kubectl 的 Kubernetes 操作，并支持通过
+`--cluster` 跨 Cluster 路由；租户命令用于查看当前租户可访问的资源在
+Workspace、Namespace 和 Cluster 中的分布。
 
-这些查看命令均为只读。`install`、`configure` 和 `uninstall` 等扩展组件生命周期命令会更改 KubeSphere 状态。
+顶层 `get` 和租户查看为只读。`kube` 下的命令以及 `install`、
+`configure` 和 `uninstall` 等扩展组件生命周期命令可能更改服务器状态。
 
 开始前，你需要：
 
@@ -34,8 +39,8 @@ ksctl COMMAND --help
 
 | 分类 | 用途 | 命令 | 可用性 |
 | --- | --- | --- | --- |
-| Kubernetes 资源管理 | 查看 Kubernetes 资源和已发现的 KubeSphere 资源。 | `get`、`describe`、`logs`、`top` | 可用 |
-| 集群管理 | 管理 KubeSphere host Cluster 和成员 Cluster。 | — | 暂未提供 |
+| Kubernetes 查看 | 读取 Kubernetes 资源和已发现的 KubeSphere 资源。 | `get` | 可用 |
+| Kubernetes 操作 | 读取、变更、调试、流式访问和管理 Kubernetes 资源。 | `kube` | 可用 |
 | 租户管理 | 查看 Workspace 及其 Namespace 和 Cluster。 | `tenant` | 可用 |
 | 扩展组件管理 | 查看、安装、配置、诊断和移除扩展组件。 | `extension` | 可用 |
 | 应用管理 | 管理 KubeSphere 应用。 | — | 暂未提供 |
@@ -43,7 +48,14 @@ ksctl COMMAND --help
 
 ## Kubernetes 资源管理
 
-资源命令遵循 kubectl 的资源发现、选择器、输出和日志习惯。本指南假定用户熟悉 kubectl，仅说明 ksctl 特有的作用域选择。
+顶层 `get` 保留为简洁的只读入口。`kube` 命名空间通过 ksctl 凭据和
+Cluster 路由提供完整的 kubectl v0.36.2 Kubernetes 操作集。本指南假定
+用户熟悉 kubectl，仅说明 ksctl 特有的作用域选择。
+
+> **破坏性变更：** `describe`、`logs` 和 `top` 现在只能通过
+> `ksctl kube` 使用，原顶层命令已删除。`--request-timeout` 也从根命令
+> 移至 `ksctl kube`；`--cluster` 仍是 ksctl 根参数，并由所有 `kube`
+> 操作继承。
 
 ### 选择资源作用域
 
@@ -58,10 +70,10 @@ ksctl COMMAND --help
 
 | 命令 | 用途 |
 | --- | --- |
-| `ksctl get TYPE [NAME]` | 显示一个或多个资源。 |
-| `ksctl describe TYPE [NAME_PREFIX]` | 显示详细状态和相关信息。 |
-| `ksctl logs (POD \| TYPE/NAME)` | 输出容器日志。 |
-| `ksctl top (pod \| node) [NAME]` | 显示当前 CPU 和内存用量。 |
+| `ksctl get TYPE [NAME]` | 通过只读顶层入口显示一个或多个资源。 |
+| `ksctl kube describe TYPE [NAME_PREFIX]` | 显示详细状态和相关信息。 |
+| `ksctl kube logs (POD \| TYPE/NAME)` | 输出容器日志。 |
+| `ksctl kube top (pod \| node) [NAME]` | 显示当前 CPU 和内存用量。 |
 
 使用 `get` 获取列表、结构化输出和脚本结果：
 
@@ -74,8 +86,8 @@ ksctl get pod web-0 -n demo -o yaml
 使用 `describe` 获取面向用户的详细信息和关联信息：
 
 ```bash
-ksctl describe deployment web -n demo
-ksctl describe pod/web-0 -n demo --cluster member-1
+ksctl kube describe deployment web -n demo
+ksctl kube describe pod/web-0 -n demo --cluster member-1
 ```
 
 可接受的单数、复数、短名称、带版本名称和带组限定名称取决于服务器发现。`describe` 不支持结构化 `-o` 输出；需要其他输出格式时请使用 `get`。
@@ -85,8 +97,8 @@ ksctl describe pod/web-0 -n demo --cluster member-1
 直接读取 Pod，或让命令将工作负载解析为其 Pod：
 
 ```bash
-ksctl logs pod/web-0 -n demo
-ksctl logs deployment/web -n demo --all-pods
+ksctl kube logs pod/web-0 -n demo
+ksctl kube logs deployment/web -n demo --all-pods
 ```
 
 该命令通过 KubeSphere API 端点读取所选 Cluster 中的日志，且不会搜索日志扩展组件。日志可能包含敏感数据，请妥善保护终端捕获内容和重定向文件。
@@ -96,12 +108,34 @@ ksctl logs deployment/web -n demo --all-pods
 `top` 从 `metrics.k8s.io/v1beta1` 读取最近的 CPU 和内存信号：
 
 ```bash
-ksctl top pod -n demo --sort-by=cpu
-ksctl top pod web-0 -n demo --containers
-ksctl top node --cluster member-1
+ksctl kube top pod -n demo --sort-by=cpu
+ksctl kube top pod web-0 -n demo --containers
+ksctl kube top node --cluster member-1
 ```
 
 所选 Cluster 必须提供 Metrics Server。这些值是当前的自动扩缩容信号，而非历史监控数据；ksctl 不会回退到 KubeSphere 监控扩展组件。
+
+### 使用完整操作集
+
+| 分类 | `kube` 命令 |
+| --- | --- |
+| 基础操作 | `create`、`expose`、`run`、`set`、`explain`、`get`、`edit`、`delete` |
+| 部署管理 | `rollout`、`scale`、`autoscale` |
+| Cluster 管理 | `certificate`、`cluster-info`、`top`、`cordon`、`uncordon`、`drain`、`taint` |
+| 排障与调试 | `describe`、`logs`、`attach`、`exec`、`port-forward`、`proxy`、`cp`、`auth`、`debug`、`events` |
+| 高级操作 | `diff`、`apply`、`patch`、`replace`、`wait`、`kustomize` |
+| 设置与发现 | `label`、`annotate`、`api-versions`、`api-resources` |
+
+每个远程 `kube` 操作都会继承根参数 `--cluster`。`apply`、`delete`、
+`drain`、`debug` 和 `rollout` 等命令可能更改所选 Cluster，并受解析出的
+KubeSphere 凭据所具备的 Kubernetes RBAC 权限约束。ksctl 保留上游
+kubectl 的写入行为，不额外增加确认步骤。
+
+`kube` 不包含 kubectl 的 kubeconfig 与 CLI 自管理命令：`config`、
+`plugin`、`version`、`completion`、`options`、`kuberc` 和空的 `alpha`。
+它不会读取或写入 `~/.kube/config`。明确需要 kubeconfig 时，请使用
+`ksctl config generate kubeconfig`。发布伴随入口提供相同的
+`unictl ks kube ...` 命令树。
 
 ## 租户管理
 
@@ -264,12 +298,11 @@ ksctl foo --context prod
 | `--token TOKEN` | 覆盖 KubeSphere 持有者令牌。 |
 | `--context NAME` | 使用具名 ksctl Context。 |
 | `--cluster NAME` | 选择 KubeSphere 成员 Cluster。 |
-| `--request-timeout DURATION` | 限制单个服务器请求；`0` 表示不限制。 |
 | `-v, --v LEVEL` | 设置日志详细级别。 |
 
-Kubernetes 资源命令在本地定义 `-n, --namespace NAME`。请将其放在 `get`、
-`describe`、`logs` 或 `top pod` 之后，以选择 Kubernetes Namespace 或
-KubeSphere 项目；它不是全局连接参数。
+顶层 `get` 在命令本地定义 `-n, --namespace NAME`。`ksctl kube` 持久定义
+`-n, --namespace NAME` 和 `--request-timeout DURATION`（`0` 表示不限制），
+并由其操作命令继承。这两个参数都不是根连接参数。
 
 | 环境变量 | 用途 |
 | --- | --- |
@@ -292,8 +325,8 @@ ksctl tenant get workspace
 ksctl tenant get ns --workspace demo
 ksctl tenant get cluster --workspace demo
 ksctl get deployments,pods -n demo --cluster member-1
-ksctl logs deployment/web -n demo --all-pods --cluster member-1
-ksctl top pod -n demo --cluster member-1
+ksctl kube logs deployment/web -n demo --all-pods --cluster member-1
+ksctl kube top pod -n demo --cluster member-1
 ```
 
 ### 管理员视角
