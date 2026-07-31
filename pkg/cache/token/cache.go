@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kubesphere/ksctl/internal/securefile"
+	"github.com/kubesphere/ksctl/pkg/securefile"
 )
 
 var unsafePathChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
