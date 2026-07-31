@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
+	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 )
 
 type rawResult []byte
@@ -53,39 +53,39 @@ func TestOutputStructuredPreservesUnknownFields(t *testing.T) {
 }
 
 func TestOutputListHeadersAndValues(t *testing.T) {
-	extension := internalextension.Extension{
-		Metadata: internalextension.ObjectMeta{
+	extension := kubesphereextension.Extension{
+		Metadata: kubesphereextension.ObjectMeta{
 			Name: "demo",
 			Labels: map[string]string{
 				"kubesphere.io/category": "observability",
 			},
 		},
-		Spec: internalextension.ExtensionSpec{
-			Provider: map[string]*internalextension.Provider{
+		Spec: kubesphereextension.ExtensionSpec{
+			Provider: map[string]*kubesphereextension.Provider{
 				"en": {Name: "KubeSphere"},
 			},
 		},
-		Status: internalextension.ExtensionStatus{
+		Status: kubesphereextension.ExtensionStatus{
 			RecommendedVersion: "1.3.0",
 			Enabled:            boolPointer(true),
 		},
 	}
-	plan := internalextension.InstallPlan{
-		Metadata: internalextension.ObjectMeta{Name: "demo"},
-		Spec: internalextension.InstallPlanSpec{
-			Extension: internalextension.ExtensionRef{Name: "demo", Version: "1.2.0"},
+	plan := kubesphereextension.InstallPlan{
+		Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
+		Spec: kubesphereextension.InstallPlanSpec{
+			Extension: kubesphereextension.ExtensionRef{Name: "demo", Version: "1.2.0"},
 			Enabled:   true,
 		},
-		Status: internalextension.InstallPlanStatus{
-			InstallationStatus: internalextension.InstallationStatus{
+		Status: kubesphereextension.InstallPlanStatus{
+			InstallationStatus: kubesphereextension.InstallationStatus{
 				State:   "Installed",
 				Version: "1.2.0",
 			},
 		},
 	}
-	result := internalextension.ListResult{Items: []internalextension.ListItem{{
-		Extension: internalextension.Object[internalextension.Extension]{Value: extension},
-		InstallPlan: &internalextension.Object[internalextension.InstallPlan]{
+	result := kubesphereextension.ListResult{Items: []kubesphereextension.ListItem{{
+		Extension: kubesphereextension.Object[kubesphereextension.Extension]{Value: extension},
+		InstallPlan: &kubesphereextension.Object[kubesphereextension.InstallPlan]{
 			Value: plan,
 		},
 	}}}
@@ -112,29 +112,29 @@ func TestOutputListHeadersAndValues(t *testing.T) {
 }
 
 func TestOutputDoesNotReportUnobservedTargetAsInstalled(t *testing.T) {
-	extension := internalextension.Extension{
-		Metadata: internalextension.ObjectMeta{Name: "demo"},
+	extension := kubesphereextension.Extension{
+		Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
 	}
-	plan := internalextension.InstallPlan{
-		Metadata: internalextension.ObjectMeta{Name: "demo"},
-		Spec: internalextension.InstallPlanSpec{
-			Extension: internalextension.ExtensionRef{
+	plan := kubesphereextension.InstallPlan{
+		Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
+		Spec: kubesphereextension.InstallPlanSpec{
+			Extension: kubesphereextension.ExtensionRef{
 				Name:    "demo",
 				Version: "2.0.0",
 			},
 			Enabled: true,
 		},
-		Status: internalextension.InstallPlanStatus{
-			InstallationStatus: internalextension.InstallationStatus{
+		Status: kubesphereextension.InstallPlanStatus{
+			InstallationStatus: kubesphereextension.InstallationStatus{
 				State: "Preparing",
 			},
 		},
 	}
-	item := internalextension.ListItem{
-		Extension: internalextension.Object[internalextension.Extension]{
+	item := kubesphereextension.ListItem{
+		Extension: kubesphereextension.Object[kubesphereextension.Extension]{
 			Value: extension,
 		},
-		InstallPlan: &internalextension.Object[internalextension.InstallPlan]{
+		InstallPlan: &kubesphereextension.Object[kubesphereextension.InstallPlan]{
 			Value: plan,
 		},
 	}
@@ -142,8 +142,8 @@ func TestOutputDoesNotReportUnobservedTargetAsInstalled(t *testing.T) {
 	var listOutput bytes.Buffer
 	if err := printList(
 		&listOutput,
-		internalextension.ListResult{
-			Items: []internalextension.ListItem{item},
+		kubesphereextension.ListResult{
+			Items: []kubesphereextension.ListItem{item},
 		},
 		outputTable,
 	); err != nil {
@@ -159,7 +159,7 @@ func TestOutputDoesNotReportUnobservedTargetAsInstalled(t *testing.T) {
 	var showOutput bytes.Buffer
 	if err := printShow(
 		&showOutput,
-		internalextension.ShowResult{
+		kubesphereextension.ShowResult{
 			Extension:   item.Extension,
 			InstallPlan: item.InstallPlan,
 		},
@@ -179,36 +179,36 @@ func TestOutputDoesNotReportUnobservedTargetAsInstalled(t *testing.T) {
 }
 
 func TestOutputPrefersSuccessfulInstallPlanObservation(t *testing.T) {
-	extension := internalextension.Extension{
-		Metadata: internalextension.ObjectMeta{Name: "demo"},
-		Status: internalextension.ExtensionStatus{
+	extension := kubesphereextension.Extension{
+		Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
+		Status: kubesphereextension.ExtensionStatus{
 			State:            "Installing",
 			Enabled:          boolPointer(false),
 			InstalledVersion: "1.0.0",
 		},
 	}
-	plan := internalextension.InstallPlan{
-		Metadata: internalextension.ObjectMeta{Name: "demo"},
-		Spec: internalextension.InstallPlanSpec{
-			Extension: internalextension.ExtensionRef{
+	plan := kubesphereextension.InstallPlan{
+		Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
+		Spec: kubesphereextension.InstallPlanSpec{
+			Extension: kubesphereextension.ExtensionRef{
 				Name:    "demo",
 				Version: "2.0.0",
 			},
 			Enabled: true,
 		},
-		Status: internalextension.InstallPlanStatus{
-			InstallationStatus: internalextension.InstallationStatus{
+		Status: kubesphereextension.InstallPlanStatus{
+			InstallationStatus: kubesphereextension.InstallationStatus{
 				State:   "Upgraded",
 				Version: "2.0.0",
 			},
 			Enabled: boolPointer(true),
 		},
 	}
-	result := internalextension.ShowResult{
-		Extension: internalextension.Object[internalextension.Extension]{
+	result := kubesphereextension.ShowResult{
+		Extension: kubesphereextension.Object[kubesphereextension.Extension]{
 			Value: extension,
 		},
-		InstallPlan: &internalextension.Object[internalextension.InstallPlan]{
+		InstallPlan: &kubesphereextension.Object[kubesphereextension.InstallPlan]{
 			Value: plan,
 		},
 	}
@@ -228,22 +228,22 @@ func TestOutputPrefersSuccessfulInstallPlanObservation(t *testing.T) {
 }
 
 func TestOutputShowDefaultIsConciseAndOmitsEmptyValues(t *testing.T) {
-	result := internalextension.ShowResult{
-		Extension: internalextension.Object[internalextension.Extension]{
-			Value: internalextension.Extension{
-				Metadata: internalextension.ObjectMeta{Name: "demo"},
-				Spec: internalextension.ExtensionSpec{
+	result := kubesphereextension.ShowResult{
+		Extension: kubesphereextension.Object[kubesphereextension.Extension]{
+			Value: kubesphereextension.Extension{
+				Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
+				Spec: kubesphereextension.ExtensionSpec{
 					DisplayName: map[string]string{"en": "Demo"},
 				},
-				Status: internalextension.ExtensionStatus{
+				Status: kubesphereextension.ExtensionStatus{
 					RecommendedVersion: "1.3.0",
 				},
 			},
 		},
-		InstallPlan: &internalextension.Object[internalextension.InstallPlan]{
-			Value: internalextension.InstallPlan{
-				Status: internalextension.InstallPlanStatus{
-					InstallationStatus: internalextension.InstallationStatus{
+		InstallPlan: &kubesphereextension.Object[kubesphereextension.InstallPlan]{
+			Value: kubesphereextension.InstallPlan{
+				Status: kubesphereextension.InstallPlanStatus{
+					InstallationStatus: kubesphereextension.InstallationStatus{
 						State:   "Installed",
 						Version: "1.2.1",
 					},
@@ -274,20 +274,20 @@ func TestOutputShowDefaultIsConciseAndOmitsEmptyValues(t *testing.T) {
 }
 
 func TestOutputShowWideFieldOrderAndMissingScalars(t *testing.T) {
-	extension := internalextension.Extension{
-		Metadata: internalextension.ObjectMeta{Name: "demo"},
-		Spec: internalextension.ExtensionSpec{
+	extension := kubesphereextension.Extension{
+		Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
+		Spec: kubesphereextension.ExtensionSpec{
 			DisplayName: map[string]string{"zh": "演示", "en": "Demo"},
 		},
-		Status: internalextension.ExtensionStatus{
-			Versions: []internalextension.ExtensionVersionInfo{
+		Status: kubesphereextension.ExtensionStatus{
+			Versions: []kubesphereextension.ExtensionVersionInfo{
 				{Version: "1.2.0"},
 				{Version: "1.1.0"},
 			},
 		},
 	}
-	result := internalextension.ShowResult{
-		Extension: internalextension.Object[internalextension.Extension]{
+	result := kubesphereextension.ShowResult{
+		Extension: kubesphereextension.Object[kubesphereextension.Extension]{
 			Value: extension,
 		},
 	}
@@ -324,14 +324,14 @@ func TestOutputShowWideFieldOrderAndMissingScalars(t *testing.T) {
 }
 
 func TestOutputSelectedVersionFieldOrder(t *testing.T) {
-	version := internalextension.ExtensionVersion{
-		Metadata: internalextension.ObjectMeta{
+	version := kubesphereextension.ExtensionVersion{
+		Metadata: kubesphereextension.ObjectMeta{
 			Name: "demo-v1",
 			Labels: map[string]string{
 				"kubesphere.io/extension-ref": "demo",
 			},
 		},
-		Spec: internalextension.ExtensionVersionSpec{
+		Spec: kubesphereextension.ExtensionVersionSpec{
 			Version:          "v1.0.0+build",
 			Category:         "observability",
 			InstallationMode: "HostOnly",
@@ -339,20 +339,20 @@ func TestOutputSelectedVersionFieldOrder(t *testing.T) {
 			KSVersion:        ">=4",
 			KubeVersion:      ">=1.27",
 			ChartURL:         "oci://example/demo",
-			ExternalDependencies: []internalextension.ExternalDependency{{
+			ExternalDependencies: []kubesphereextension.ExternalDependency{{
 				Name:     "logging",
 				Version:  "1.x",
 				Required: true,
 			}},
 		},
 	}
-	result := internalextension.ShowResult{
-		Extension: internalextension.Object[internalextension.Extension]{
-			Value: internalextension.Extension{
-				Metadata: internalextension.ObjectMeta{Name: "demo"},
+	result := kubesphereextension.ShowResult{
+		Extension: kubesphereextension.Object[kubesphereextension.Extension]{
+			Value: kubesphereextension.Extension{
+				Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
 			},
 		},
-		SelectedVersion: &internalextension.Object[internalextension.ExtensionVersion]{
+		SelectedVersion: &kubesphereextension.Object[kubesphereextension.ExtensionVersion]{
 			Value: version,
 		},
 	}
@@ -389,16 +389,16 @@ func TestOutputSelectedVersionFieldOrder(t *testing.T) {
 }
 
 func TestOutputShowPrintsSortedClusterSchedulingStatuses(t *testing.T) {
-	result := internalextension.ShowResult{
-		Extension: internalextension.Object[internalextension.Extension]{
-			Value: internalextension.Extension{
-				Metadata: internalextension.ObjectMeta{Name: "demo"},
+	result := kubesphereextension.ShowResult{
+		Extension: kubesphereextension.Object[kubesphereextension.Extension]{
+			Value: kubesphereextension.Extension{
+				Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
 			},
 		},
-		InstallPlan: &internalextension.Object[internalextension.InstallPlan]{
-			Value: internalextension.InstallPlan{
-				Status: internalextension.InstallPlanStatus{
-					ClusterSchedulingStatuses: map[string]internalextension.InstallationStatus{
+		InstallPlan: &kubesphereextension.Object[kubesphereextension.InstallPlan]{
+			Value: kubesphereextension.InstallPlan{
+				Status: kubesphereextension.InstallPlanStatus{
+					ClusterSchedulingStatuses: map[string]kubesphereextension.InstallationStatus{
 						"member-z": {
 							Version:         "1.2.1",
 							State:           "Installing",
@@ -467,11 +467,11 @@ func TestTableCellEscapesTerminalControlSequences(t *testing.T) {
 }
 
 func TestOutputVersionsAndNamedStatus(t *testing.T) {
-	versions := internalextension.VersionsResult{
-		Items: internalextension.List[internalextension.ExtensionVersion]{
-			Items: []internalextension.Object[internalextension.ExtensionVersion]{
-				{Value: internalextension.ExtensionVersion{
-					Spec: internalextension.ExtensionVersionSpec{
+	versions := kubesphereextension.VersionsResult{
+		Items: kubesphereextension.List[kubesphereextension.ExtensionVersion]{
+			Items: []kubesphereextension.Object[kubesphereextension.ExtensionVersion]{
+				{Value: kubesphereextension.ExtensionVersion{
+					Spec: kubesphereextension.ExtensionVersionSpec{
 						Version:          "1.2.0",
 						InstallationMode: "Multicluster",
 						KSVersion:        ">=4",
@@ -492,24 +492,24 @@ func TestOutputVersionsAndNamedStatus(t *testing.T) {
 		t.Fatalf("versions = %q, want %q", got, want)
 	}
 
-	plan := internalextension.InstallPlan{
-		Metadata: internalextension.ObjectMeta{Name: "demo"},
-		Spec: internalextension.InstallPlanSpec{
-			Extension: internalextension.ExtensionRef{
+	plan := kubesphereextension.InstallPlan{
+		Metadata: kubesphereextension.ObjectMeta{Name: "demo"},
+		Spec: kubesphereextension.InstallPlanSpec{
+			Extension: kubesphereextension.ExtensionRef{
 				Name:    "demo",
 				Version: "1.2.0",
 			},
 			Enabled: true,
 		},
-		Status: internalextension.InstallPlanStatus{
-			InstallationStatus: internalextension.InstallationStatus{
+		Status: kubesphereextension.InstallPlanStatus{
+			InstallationStatus: kubesphereextension.InstallationStatus{
 				State:           "Installed",
 				Version:         "1.2.0",
 				TargetNamespace: "demo-system",
 				JobName:         "host-job",
 			},
 			Enabled: boolPointer(true),
-			ClusterSchedulingStatuses: map[string]internalextension.InstallationStatus{
+			ClusterSchedulingStatuses: map[string]kubesphereextension.InstallationStatus{
 				"member-z": {
 					State:           "Installing",
 					Version:         "1.2.0",
@@ -525,8 +525,8 @@ func TestOutputVersionsAndNamedStatus(t *testing.T) {
 			},
 		},
 	}
-	result := internalextension.StatusResult{
-		Object: &internalextension.Object[internalextension.InstallPlan]{
+	result := kubesphereextension.StatusResult{
+		Object: &kubesphereextension.Object[kubesphereextension.InstallPlan]{
 			Value: plan,
 		},
 	}
@@ -554,7 +554,7 @@ func TestOutputPropagatesWriterFailures(t *testing.T) {
 	}
 	if err := printList(
 		failingWriter{err: sentinel},
-		internalextension.ListResult{},
+		kubesphereextension.ListResult{},
 		outputTable,
 	); !errors.Is(err, sentinel) {
 		t.Fatalf("printList() error = %v", err)

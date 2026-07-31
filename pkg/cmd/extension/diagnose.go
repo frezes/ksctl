@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
+	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 )
@@ -37,7 +37,7 @@ func newDiagnoseCommand(
 			diagnosis, serviceErr := service.Diagnose(
 				command.Context(),
 				args[0],
-				internalextension.DiagnoseOptions{
+				kubesphereextension.DiagnoseOptions{
 					TargetCluster: targetCluster,
 				},
 			)
@@ -82,18 +82,18 @@ type diagnosisCounts struct {
 }
 
 func countDiagnosis(
-	checks []internalextension.DiagnosticCheck,
+	checks []kubesphereextension.DiagnosticCheck,
 ) diagnosisCounts {
 	var counts diagnosisCounts
 	for _, check := range checks {
 		switch check.Status {
-		case internalextension.DiagnosticOK:
+		case kubesphereextension.DiagnosticOK:
 			counts.ok++
-		case internalextension.DiagnosticInfo:
+		case kubesphereextension.DiagnosticInfo:
 			counts.info++
-		case internalextension.DiagnosticWarn:
+		case kubesphereextension.DiagnosticWarn:
 			counts.warn++
-		case internalextension.DiagnosticError:
+		case kubesphereextension.DiagnosticError:
 			counts.error++
 		}
 	}
@@ -103,7 +103,7 @@ func countDiagnosis(
 func printDiagnosis(
 	out io.Writer,
 	name string,
-	diagnosis internalextension.Diagnosis,
+	diagnosis kubesphereextension.Diagnosis,
 	verbose bool,
 	complete bool,
 ) error {
@@ -121,8 +121,8 @@ func printDiagnosis(
 	rows := [][]string{{"CHECK", "STATUS", "MESSAGE"}}
 	for _, check := range diagnosis.Checks {
 		if !verbose &&
-			check.Status != internalextension.DiagnosticWarn &&
-			check.Status != internalextension.DiagnosticError {
+			check.Status != kubesphereextension.DiagnosticWarn &&
+			check.Status != kubesphereextension.DiagnosticError {
 			continue
 		}
 		rows = append(rows, []string{

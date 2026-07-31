@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
+	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 )
@@ -34,7 +34,7 @@ func newListCommand(
 			}
 			result, err := service.List(
 				command.Context(),
-				internalextension.ListOptions{
+				kubesphereextension.ListOptions{
 					Category:      category,
 					InstalledOnly: installedOnly,
 				},
@@ -220,9 +220,9 @@ func newStatusCommand(
 				_, err := service.Watch(
 					command.Context(),
 					name,
-					internalextension.PollOptions{
+					kubesphereextension.PollOptions{
 						Timeout: waitTimeout,
-						OnState: func(event internalextension.StateEvent) error {
+						OnState: func(event kubesphereextension.StateEvent) error {
 							if !headerWritten {
 								if err := printWatchHeader(streams.Out); err != nil {
 									return fmt.Errorf(

@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	extensioncmd "github.com/kubesphere/ksctl/pkg/cmd/extension"
+	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	kubesphererest "kubesphere.io/client-go/rest"
@@ -49,8 +49,8 @@ func newExtensionCommand(
 					err,
 				)
 			}
-			return internalextension.NewService(
-				internalextension.NewRESTClient(restClient),
+			return kubesphereextension.NewService(
+				kubesphereextension.NewRESTClient(restClient),
 			), nil
 		},
 	)

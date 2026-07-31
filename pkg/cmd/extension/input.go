@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
+	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"github.com/spf13/cobra"
 )
 
@@ -163,22 +163,22 @@ func (flags *configurationFlags) load(
 func (flags *configurationFlags) planChanges(
 	command *cobra.Command,
 	loaded loadedConfiguration,
-) internalextension.PlanChanges {
-	changes := internalextension.PlanChanges{}
+) kubesphereextension.PlanChanges {
+	changes := kubesphereextension.PlanChanges{}
 	switch {
 	case flags.clearConfig:
-		changes.Config.Mode = internalextension.Clear
+		changes.Config.Mode = kubesphereextension.Clear
 	case command.Flags().Changed("config"):
-		changes.Config = internalextension.StringChange{
-			Mode:  internalextension.Replace,
+		changes.Config = kubesphereextension.StringChange{
+			Mode:  kubesphereextension.Replace,
 			Value: *loaded.Config,
 		}
 	}
 	switch {
 	case flags.clearClusterScheduling:
-		changes.Scheduling.Mode = internalextension.Clear
+		changes.Scheduling.Mode = kubesphereextension.Clear
 	case command.Flags().Changed("clusters"):
-		changes.Scheduling.Mode = internalextension.Replace
+		changes.Scheduling.Mode = kubesphereextension.Replace
 		changes.Scheduling.Clusters = slices.Clone(loaded.Clusters)
 	}
 	changes.Scheduling.SetOverrides = loaded.Overrides

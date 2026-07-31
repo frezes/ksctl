@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
+	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
@@ -16,55 +16,55 @@ import (
 type Service interface {
 	List(
 		context.Context,
-		internalextension.ListOptions,
-	) (internalextension.ListResult, error)
+		kubesphereextension.ListOptions,
+	) (kubesphereextension.ListResult, error)
 	Show(
 		context.Context,
 		string,
 		string,
-	) (internalextension.ShowResult, error)
+	) (kubesphereextension.ShowResult, error)
 	Versions(
 		context.Context,
 		string,
-	) (internalextension.VersionsResult, error)
+	) (kubesphereextension.VersionsResult, error)
 	Status(
 		context.Context,
 		string,
-	) (internalextension.StatusResult, error)
+	) (kubesphereextension.StatusResult, error)
 	Watch(
 		context.Context,
 		string,
-		internalextension.PollOptions,
-	) (internalextension.Object[internalextension.InstallPlan], error)
+		kubesphereextension.PollOptions,
+	) (kubesphereextension.Object[kubesphereextension.InstallPlan], error)
 	Install(
 		context.Context,
 		string,
-		internalextension.InstallOptions,
-	) (internalextension.Operation, error)
+		kubesphereextension.InstallOptions,
+	) (kubesphereextension.Operation, error)
 	Upgrade(
 		context.Context,
 		string,
-		internalextension.UpgradeOptions,
-	) (internalextension.Operation, error)
+		kubesphereextension.UpgradeOptions,
+	) (kubesphereextension.Operation, error)
 	Configure(
 		context.Context,
 		string,
-		internalextension.PlanChanges,
-	) (internalextension.Operation, error)
+		kubesphereextension.PlanChanges,
+	) (kubesphereextension.Operation, error)
 	Uninstall(
 		context.Context,
 		string,
-	) (internalextension.Operation, error)
+	) (kubesphereextension.Operation, error)
 	Wait(
 		context.Context,
-		internalextension.Operation,
-		internalextension.PollOptions,
-	) (internalextension.WaitResult, error)
+		kubesphereextension.Operation,
+		kubesphereextension.PollOptions,
+	) (kubesphereextension.WaitResult, error)
 	Diagnose(
 		context.Context,
 		string,
-		internalextension.DiagnoseOptions,
-	) (internalextension.Diagnosis, error)
+		kubesphereextension.DiagnoseOptions,
+	) (kubesphereextension.Diagnosis, error)
 }
 
 type ServiceFactory func() (Service, error)
