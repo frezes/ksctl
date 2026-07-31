@@ -502,6 +502,46 @@ func TestAggregatingTransportPaginatesEachNamespaceIndependently(t *testing.T) {
 	}
 }
 
+func TestAggregatingTransportRejectsRepeatedContinueToken(t *testing.T) {
+	var scopedRequests int
+	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/proxy/clusters/member/api/v1/pods" {
+			return jsonResponse(request, http.StatusForbidden, `{"kind":"Status"}`), nil
+		}
+		scopedRequests++
+		if scopedRequests > 2 {
+			return nil, errors.New("test stopped runaway pagination")
+		}
+		return jsonResponse(
+			request,
+			http.StatusOK,
+			pagedPodList("team-a", "pod-a", "same-token"),
+		), nil
+	})
+	client := newAggregatingTestClient(
+		t,
+		base,
+		&fakeNamespaceResolver{namespaces: []string{"team-a"}},
+		&aggregationState{mode: aggregateOnForbidden},
+	)
+
+	response, err := client.Get(
+		"https://example.test/proxy/clusters/member/api/v1/pods?limit=1",
+	)
+	if response != nil {
+		response.Body.Close()
+		t.Fatalf("Get() response = %#v, want nil", response)
+	}
+	if err == nil ||
+		!strings.Contains(err.Error(), `namespace "team-a"`) ||
+		!strings.Contains(err.Error(), "repeated continue token") {
+		t.Fatalf("Get() error = %v, want repeated token failure", err)
+	}
+	if scopedRequests != 2 {
+		t.Fatalf("scoped requests = %d, want 2", scopedRequests)
+	}
+}
+
 func TestAggregatingTransportLimitsNamespaceConcurrency(t *testing.T) {
 	namespaces := make([]string, 10)
 	for index := range namespaces {

@@ -246,6 +246,7 @@ func (t *aggregatingRoundTripper) fetchNamespace(
 ) ([]byte, error) {
 	query := request.URL.Query()
 	pageDocuments := make([]scopedDocument, 0, 1)
+	seenTokens := make(map[string]struct{})
 	for page := 1; ; page++ {
 		scopedRequest := namespaceRequest(ctx, request, endpoint, namespace)
 		scopedRequest.URL.RawQuery = query.Encode()
@@ -319,6 +320,15 @@ func (t *aggregatingRoundTripper) fetchNamespace(
 		if token == "" {
 			break
 		}
+		if _, found := seenTokens[token]; found {
+			return nil, fmt.Errorf(
+				"decode %s response in namespace %q page %d: server returned repeated continue token",
+				endpoint.GVR.Resource,
+				namespace,
+				page,
+			)
+		}
+		seenTokens[token] = struct{}{}
 		query.Set("continue", token)
 	}
 
