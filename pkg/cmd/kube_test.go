@@ -66,12 +66,14 @@ func TestKubeRequestTimeoutLimitsRawGet(t *testing.T) {
 		return
 	}
 
+	requestElapsed := make(chan time.Duration, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		<-r.Context().Done()
+		requestElapsed <- time.Since(start)
 	}))
 	defer server.Close()
 
-	start := time.Now()
 	helper := exec.Command(os.Args[0], "-test.run=^TestKubeRequestTimeoutLimitsRawGet$")
 	helper.Env = append(
 		os.Environ(),
@@ -83,8 +85,13 @@ func TestKubeRequestTimeoutLimitsRawGet(t *testing.T) {
 	if err == nil {
 		t.Fatalf("timeout helper succeeded, output:\n%s", output)
 	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("request timeout took %s, want less than one second", elapsed)
+	select {
+	case elapsed := <-requestElapsed:
+		if elapsed > time.Second {
+			t.Fatalf("request timeout took %s, want less than one second", elapsed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not observe request cancellation")
 	}
 	if !strings.Contains(strings.ToLower(string(output)), "timeout") &&
 		!strings.Contains(strings.ToLower(string(output)), "deadline exceeded") {
