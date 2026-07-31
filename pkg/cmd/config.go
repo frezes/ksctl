@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
-	"github.com/kubesphere/ksctl/pkg/config"
 	"github.com/spf13/cobra"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 type kubeconfigRESTClientGetter interface {

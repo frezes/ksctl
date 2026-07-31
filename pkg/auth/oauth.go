@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
-	"github.com/kubesphere/ksctl/pkg/config"
 	kubesphererest "kubesphere.io/client-go/rest"
+	tokencache "kubesphere.io/ksctl/pkg/cache/token"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 type TokenRequestOptions struct {

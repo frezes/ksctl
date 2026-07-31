@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	kscmd "github.com/kubesphere/ksctl/pkg/cmd"
+	kscmd "kubesphere.io/ksctl/pkg/cmd"
 )
 
 func main() {

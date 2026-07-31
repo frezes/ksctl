@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubesphere/ksctl/pkg/config"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 type ResolveInput struct {

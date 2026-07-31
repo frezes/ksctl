@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 func TestLifecycleFlagValidationBeforeFactory(t *testing.T) {

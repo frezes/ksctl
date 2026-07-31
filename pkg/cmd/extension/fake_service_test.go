@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 type fakeService struct {

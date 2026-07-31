@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubesphere/ksctl/pkg/config"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TestResolvePrefersFlagsOverEnvAndConfig(t *testing.T) {

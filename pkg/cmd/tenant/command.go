@@ -6,9 +6,9 @@ import (
 	"io"
 	"time"
 
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	"github.com/spf13/cobra"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
 )
 
 type RESTClientGetter interface {

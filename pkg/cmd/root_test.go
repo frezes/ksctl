@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubesphere/ksctl/pkg/config"
 	"github.com/spf13/cobra"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 const (

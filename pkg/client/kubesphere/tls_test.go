@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kubesphere/ksctl/pkg/config"
 	ksrest "kubesphere.io/client-go/rest"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TestTLSClientConfigMapsEveryField(t *testing.T) {

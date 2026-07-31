@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
+	tokencache "kubesphere.io/ksctl/pkg/cache/token"
 )
 
 type Input struct {

@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubesphere/ksctl/pkg/auth"
-	"github.com/kubesphere/ksctl/pkg/config"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
+	"kubesphere.io/ksctl/pkg/auth"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TestRESTClientGetterBuildsKubeSphereConfig(t *testing.T) {

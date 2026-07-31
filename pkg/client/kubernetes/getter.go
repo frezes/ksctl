@@ -8,9 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kubesphere/ksctl/pkg/auth"
-	clientoptions "github.com/kubesphere/ksctl/pkg/client"
-	"github.com/kubesphere/ksctl/pkg/config"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
@@ -18,6 +15,9 @@ import (
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"kubesphere.io/ksctl/pkg/auth"
+	clientoptions "kubesphere.io/ksctl/pkg/client"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 const clientConfigName = "ksctl"

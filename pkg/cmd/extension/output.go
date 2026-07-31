@@ -12,8 +12,8 @@ import (
 	"text/tabwriter"
 	"unicode"
 
-	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"k8s.io/cli-runtime/pkg/printers"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 	"sigs.k8s.io/yaml"
 )
 

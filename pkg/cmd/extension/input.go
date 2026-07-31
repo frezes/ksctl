@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"github.com/spf13/cobra"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 const maxConfigurationInputBytes = 10 << 20

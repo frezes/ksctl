@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
-	"github.com/kubesphere/ksctl/pkg/config"
+	tokencache "kubesphere.io/ksctl/pkg/cache/token"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TestConfigCurrentContext(t *testing.T) {

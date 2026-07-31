@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kubesphere/ksctl/pkg/config"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 type extensionIntegrationServer struct {

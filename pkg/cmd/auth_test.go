@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubesphere/ksctl/pkg/auth"
-	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
-	authcmd "github.com/kubesphere/ksctl/pkg/cmd/auth"
-	"github.com/kubesphere/ksctl/pkg/config"
 	"github.com/spf13/cobra"
+	"kubesphere.io/ksctl/pkg/auth"
+	tokencache "kubesphere.io/ksctl/pkg/cache/token"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	authcmd "kubesphere.io/ksctl/pkg/cmd/auth"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 type commandPrompter struct {

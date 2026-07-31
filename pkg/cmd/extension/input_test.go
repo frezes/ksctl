@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 func writeInputFile(t testing.TB, name, content string) string {

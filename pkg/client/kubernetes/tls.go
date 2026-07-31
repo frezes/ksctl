@@ -1,8 +1,8 @@
 package kubernetes
 
 import (
-	"github.com/kubesphere/ksctl/pkg/config"
 	"k8s.io/client-go/rest"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func toKubernetesTLSClientConfig(cfg config.TLSClientConfig, insecureOverride bool) rest.TLSClientConfig {

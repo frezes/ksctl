@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	kubesphereextension "github.com/kubesphere/ksctl/pkg/kubesphere/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
 	kubesphererest "kubesphere.io/client-go/rest"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 type Service interface {

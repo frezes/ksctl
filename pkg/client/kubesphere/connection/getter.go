@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kubesphere/ksctl/pkg/auth"
-	clientoptions "github.com/kubesphere/ksctl/pkg/client"
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
-	"github.com/kubesphere/ksctl/pkg/config"
 	kubesphererest "kubesphere.io/client-go/rest"
+	"kubesphere.io/ksctl/pkg/auth"
+	clientoptions "kubesphere.io/ksctl/pkg/client"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 type Dependencies struct {
