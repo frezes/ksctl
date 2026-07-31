@@ -9,8 +9,8 @@ and API workflows.
 
 - Inspect Kubernetes and discovered KubeSphere resources concisely with the
   top-level `get` command.
-- Use `kube` for the complete kubectl-compatible Kubernetes operation command
-  set, routed through KubeSphere authentication and member-Cluster selection.
+- Use `kube` for nearly the full kubectl operation surface through KubeSphere
+  authentication and member-Cluster routing.
 - Authenticate, switch saved Contexts, and target host or member Clusters.
 - Explore tenant Workspaces, Namespaces, and Clusters.
 - Discover, install, configure, diagnose, and remove KubeSphere Extensions.
@@ -57,19 +57,21 @@ available to it:
 
 ```bash
 ksctl auth login
+ksctl auth whoami
+ksctl config current-context
+
 ksctl get pods -A
-ksctl kube describe deployment web -n demo
-ksctl kube logs deployment/web -n demo --all-pods
-ksctl kube top pod -n demo
 ksctl kube apply -f app.yaml --cluster member-1
 ksctl tenant get workspace
+ksctl extension list
+ksctl api /kapis/version
 ```
 
 Interactive login prompts for missing connection and account values, reads the
 password without echo, saves the new Context, and makes it current. The
-`web` workload and `demo` Namespace above are example names; replace them with
-resources from your environment. The `top` command requires Metrics Server in
-the selected Cluster.
+`app.yaml` manifest and `member-1` Cluster above are examples; replace them
+with values from your environment. Commands under `kube`, including `apply`,
+can change the selected Cluster.
 
 ## Command overview
 
@@ -78,7 +80,7 @@ the selected Cluster.
 | `auth` | Log in, inspect the current identity, and log out. |
 | `config` | Inspect and select Contexts or generate kubeconfig. |
 | `get` | Read Kubernetes and discovered KubeSphere resources. |
-| `kube` | Run Kubernetes read, mutation, rollout, debugging, streaming, and cluster-management operations. |
+| `kube` | Run nearly the full kubectl operation surface through KubeSphere. |
 | `tenant` | Inspect tenant Workspaces, Namespaces, and Clusters. |
 | `extension` | Discover and manage KubeSphere Extensions. |
 | `api` | Send an authenticated request to a KubeSphere API path. |
@@ -87,7 +89,6 @@ the selected Cluster.
 | `version` | Print client and server version information. |
 
 Run `ksctl COMMAND --help` for the complete reference for an installed release.
-The release companion renders the same command tree as `unictl ks kube ...`.
 See the [CLI guide](docs/cli.md) for command workflows, flags, and
 troubleshooting.
 
