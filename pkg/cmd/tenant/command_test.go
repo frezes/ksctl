@@ -7,14 +7,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
+	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/rest"
+	clientgotesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	kubesphererest "kubesphere.io/client-go/rest"
 )
 
@@ -192,6 +198,367 @@ func TestCommandRejectsUnsupportedInputsBeforeConnection(t *testing.T) {
 			t.Fatalf("Execute(%v) error = %v, want %q", test.args, err, test.want)
 		}
 	}
+}
+
+func TestCommandRejectsInvalidWorkspaceResourceQueriesBeforeRequest(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{
+			args: []string{"get", "pods", "--workspace", "platform", "-n", "demo"},
+			want: "--workspace and --namespace",
+		},
+		{
+			args: []string{"get", "pods", "--workspace", "platform", "-A"},
+			want: "--workspace and --all-namespaces",
+		},
+		{
+			args: []string{"get", "pods", "--workspace", "platform", "-w"},
+			want: "watch is not supported",
+		},
+		{
+			args: []string{"get", "--raw", "/api/v1/pods", "--workspace", "platform"},
+			want: "--workspace and --raw",
+		},
+		{
+			args: []string{"get", "-f", "pod.yaml", "--workspace", "platform"},
+			want: "--workspace and --filename",
+		},
+		{
+			args: []string{"get", "pod/web", "--workspace", "platform"},
+			want: "collection queries",
+		},
+		{
+			args: []string{"get", "nodes", "--workspace", "platform"},
+			want: "cluster-scoped",
+		},
+	}
+	for _, test := range tests {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			var requests int
+			getter := &transportTestGetter{
+				config: &rest.Config{
+					Host: "https://example.test",
+					Transport: roundTripperFunc(func(
+						request *http.Request,
+					) (*http.Response, error) {
+						requests++
+						return jsonResponse(
+							request,
+							http.StatusInternalServerError,
+							`{"kind":"Status"}`,
+						), nil
+					}),
+				},
+				mapper: testRESTMapper(),
+				loader: defaultClientConfig(),
+			}
+			command := NewCommandWithOptions(CommandOptions{
+				DisplayName:      "ksctl",
+				KubeSphereGetter: fakeRESTClientGetter{},
+				KubernetesGetter: getter,
+				Streams: genericiooptions.IOStreams{
+					Out:    io.Discard,
+					ErrOut: io.Discard,
+				},
+				Namespace: new(string),
+			})
+			command.SilenceErrors = true
+			command.SilenceUsage = true
+			command.SetArgs(test.args)
+
+			err := command.Execute()
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Execute() error = %v, want %q", err, test.want)
+			}
+			if requests != 0 {
+				t.Fatalf("resource requests = %d, want 0", requests)
+			}
+		})
+	}
+}
+
+func TestConditionalWriterBuffersOnlyAggregatedOutput(t *testing.T) {
+	var delegate bytes.Buffer
+	state := &aggregationState{}
+	writer := &conditionalWriter{delegate: &delegate, state: state}
+
+	if _, err := writer.Write([]byte("direct")); err != nil {
+		t.Fatalf("Write(direct) error = %v", err)
+	}
+	if got := delegate.String(); got != "direct" {
+		t.Fatalf("delegate after direct write = %q, want %q", got, "direct")
+	}
+
+	state.used.Store(true)
+	if _, err := writer.Write([]byte(" aggregate")); err != nil {
+		t.Fatalf("Write(aggregate) error = %v", err)
+	}
+	if got := delegate.String(); got != "direct" {
+		t.Fatalf("delegate before commit = %q, want %q", got, "direct")
+	}
+	if err := writer.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if got := delegate.String(); got != "direct aggregate" {
+		t.Fatalf("delegate after commit = %q, want %q", got, "direct aggregate")
+	}
+}
+
+func TestCommandAdministratorAllNamespacesUsesNativeKubectl(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		requests []string
+	)
+	transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		mu.Lock()
+		requests = append(requests, r.URL.RequestURI())
+		mu.Unlock()
+		if r.URL.Path != "/clusters/member/api/v1/pods" {
+			return jsonResponse(r, http.StatusNotFound, `{"kind":"Status"}`), nil
+		}
+		return jsonResponse(r, http.StatusOK, podList("admin", "pod-a")), nil
+	})
+
+	out, _, err := executeGenericTenantCommand(
+		transport,
+		[]string{"get", "pods", "-A", "-o", "json"},
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got, want := podNames(t, out.Bytes()), []string{"admin/pod-a"}; !equalStrings(got, want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 1 ||
+		strings.Contains(requests[0], "/kapis/tenant.kubesphere.io/") {
+		t.Fatalf("requests = %v, want one native Kubernetes request", requests)
+	}
+}
+
+func TestCommandTenantAllNamespacesFallsBackAndPrintsOneTable(t *testing.T) {
+	transport := newTenantCommandTransport(t, tenantCommandServerOptions{
+		namespaces: []string{"team-b", "team-a"},
+		globalCode: http.StatusForbidden,
+		table:      true,
+	})
+
+	out, _, err := executeGenericTenantCommand(
+		transport,
+		[]string{"get", "pods", "-A"},
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	lines := strings.Fields(out.String())
+	if got, want := lines, []string{
+		"NAMESPACE", "NAME",
+		"team-b", "pod-b",
+		"team-a", "pod-a",
+	}; !equalStrings(got, want) {
+		t.Fatalf("table fields = %v, want %v\n%s", got, want, out.String())
+	}
+}
+
+func TestCommandWorkspacePrintsJSONFromOnlyWorkspaceNamespaces(t *testing.T) {
+	transport := newTenantCommandTransport(t, tenantCommandServerOptions{
+		namespaces: []string{"team-a", "team-b"},
+		globalCode: http.StatusOK,
+	})
+
+	out, _, err := executeGenericTenantCommand(
+		transport,
+		[]string{"get", "pods", "--workspace", "platform", "-o", "json"},
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got, want := podNames(t, out.Bytes()), []string{
+		"team-a/pod-a",
+		"team-b/pod-b",
+	}; !equalStrings(got, want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+}
+
+func TestCommandAggregateFailurePrintsNoPartialOutput(t *testing.T) {
+	transport := newTenantCommandTransport(t, tenantCommandServerOptions{
+		namespaces:    []string{"team-a", "team-b"},
+		globalCode:    http.StatusForbidden,
+		failNamespace: "team-b",
+	})
+
+	out, _, err := executeGenericTenantCommand(
+		transport,
+		[]string{"get", "pods", "-A", "-o", "json"},
+	)
+	if err == nil || !strings.Contains(err.Error(), `namespace "team-b"`) {
+		t.Fatalf("Execute() error = %v, want team-b failure", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+}
+
+func TestCommandTenantWatchDiscardsBufferedInitialList(t *testing.T) {
+	transport := newTenantCommandTransport(t, tenantCommandServerOptions{
+		namespaces: []string{"team-a"},
+		globalCode: http.StatusForbidden,
+		table:      true,
+	})
+
+	out, _, err := executeGenericTenantCommand(
+		transport,
+		[]string{"get", "pods", "-A", "--watch"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "multi-namespace watch is not supported") {
+		t.Fatalf("Execute() error = %v, want tenant watch rejection", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+}
+
+func defaultClientConfig(serverURLs ...string) clientcmd.ClientConfig {
+	serverURL := "https://example.test"
+	if len(serverURLs) != 0 {
+		serverURL = serverURLs[0]
+	}
+	return clientcmd.NewDefaultClientConfig(
+		clientcmdapi.Config{
+			CurrentContext: "test",
+			Contexts: map[string]*clientcmdapi.Context{
+				"test": {
+					Cluster:   "test",
+					Namespace: "default",
+				},
+			},
+			Clusters: map[string]*clientcmdapi.Cluster{
+				"test": {Server: serverURL},
+			},
+		},
+		&clientcmd.ConfigOverrides{},
+	)
+}
+
+func executeGenericTenantCommand(
+	transport http.RoundTripper,
+	args []string,
+) (*bytes.Buffer, *bytes.Buffer, error) {
+	out := new(bytes.Buffer)
+	errOut := new(bytes.Buffer)
+	namespace := "context-default"
+	command := NewCommandWithOptions(CommandOptions{
+		DisplayName: "ksctl",
+		KubeSphereGetter: fakeRESTClientGetter{
+			config: &kubesphererest.Config{
+				Host:      "https://example.test",
+				Transport: transport,
+			},
+			cluster: "member",
+		},
+		KubernetesGetter: &transportTestGetter{
+			config: &rest.Config{
+				Host:      "https://example.test/clusters/member",
+				Transport: transport,
+			},
+			mapper:    testRESTMapper(),
+			loader:    defaultClientConfig("https://example.test/clusters/member"),
+			discovery: testCachedDiscovery(),
+		},
+		Streams: genericiooptions.IOStreams{
+			Out:    out,
+			ErrOut: errOut,
+		},
+		Namespace: &namespace,
+	})
+	command.SilenceErrors = true
+	command.SilenceUsage = true
+	command.SetOut(out)
+	command.SetErr(errOut)
+	command.SetArgs(args)
+	return out, errOut, command.Execute()
+}
+
+func testCachedDiscovery() discovery.CachedDiscoveryInterface {
+	client := &fakediscovery.FakeDiscovery{Fake: &clientgotesting.Fake{}}
+	client.Resources = []*metav1.APIResourceList{{
+		GroupVersion: "v1",
+		APIResources: []metav1.APIResource{
+			{Name: "pods", SingularName: "pod", Namespaced: true, Kind: "Pod"},
+			{Name: "nodes", SingularName: "node", Namespaced: false, Kind: "Node"},
+		},
+	}}
+	return memory.NewMemCacheClient(client)
+}
+
+type tenantCommandServerOptions struct {
+	namespaces    []string
+	globalCode    int
+	table         bool
+	failNamespace string
+}
+
+func newTenantCommandTransport(
+	t *testing.T,
+	options tenantCommandServerOptions,
+) http.RoundTripper {
+	t.Helper()
+	return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.URL.Path ==
+			"/clusters/member/kapis/tenant.kubesphere.io/v1beta1/workspaces/platform/namespaces",
+			r.URL.Path ==
+				"/clusters/member/kapis/tenant.kubesphere.io/v1beta1/namespaces":
+			objects := make([]string, len(options.namespaces))
+			for index, namespace := range options.namespaces {
+				objects[index] = `{"metadata":{"name":` + quoteJSON(namespace) + `}}`
+			}
+			return jsonResponse(
+				r,
+				http.StatusOK,
+				fmt.Sprintf(`{"items":[%s]}`, strings.Join(objects, ",")),
+			), nil
+		case r.URL.Path == "/clusters/member/api/v1/pods":
+			return jsonResponse(r, options.globalCode, `{"kind":"Status"}`), nil
+		case strings.Contains(r.URL.Path, "/api/v1/namespaces/"):
+			namespace := namespaceFromPath(r.URL.Path)
+			if namespace == options.failNamespace {
+				return jsonResponse(
+					r,
+					http.StatusInternalServerError,
+					`{"kind":"Status"}`,
+				), nil
+			}
+			if options.table {
+				return jsonResponse(
+					r,
+					http.StatusOK,
+					podTable(namespace, "pod-"+strings.TrimPrefix(namespace, "team-")),
+				), nil
+			}
+			return jsonResponse(
+				r,
+				http.StatusOK,
+				podList(namespace, "pod-"+strings.TrimPrefix(namespace, "team-")),
+			), nil
+		default:
+			return jsonResponse(r, http.StatusNotFound, `{"kind":"Status"}`), nil
+		}
+	})
+}
+
+func podTable(namespace, name string) string {
+	return `{
+		"apiVersion":"meta.k8s.io/v1",
+		"kind":"Table",
+		"metadata":{"resourceVersion":"1"},
+		"columnDefinitions":[{"name":"Name","type":"string","priority":0}],
+		"rows":[{"cells":[` + quoteJSON(name) + `]}]
+	}`
 }
 
 func findCommand(command interface{ Commands() []*cobra.Command }, name string) *cobra.Command {

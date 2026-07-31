@@ -44,12 +44,20 @@ func NewCommandWithOptions(options CommandOptions) *cobra.Command {
 	if displayName == "" {
 		displayName = command.Name()
 	}
-	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(options.KubernetesGetter))
+	state := &aggregationState{}
+	resolver := newNamespaceResolver(options.KubeSphereGetter)
+	getter := newAggregatingRESTClientGetter(
+		options.KubernetesGetter,
+		resolver,
+		state,
+	)
+	factory := cmdutil.NewFactory(cmdutil.NewMatchVersionFlags(getter))
 	get := newGenericGetCommand(
 		displayName+" tenant",
 		factory,
 		options.Streams,
 		options.Namespace,
+		state,
 	)
 	get.Flags().String("workspace", "", "KubeSphere workspace name")
 

@@ -153,6 +153,12 @@ func (t *aggregatingRoundTripper) RoundTrip(
 		if response.Body != nil {
 			response.Body.Close()
 		}
+		if request.URL.Query().Get("watch") == "true" {
+			t.state.used.Store(true)
+			return nil, fmt.Errorf(
+				"tenant multi-namespace watch is not supported; choose one namespace with --namespace",
+			)
+		}
 		return t.aggregate(request, endpoint, mapping)
 	default:
 		return t.base.RoundTrip(request)

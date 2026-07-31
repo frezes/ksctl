@@ -262,6 +262,37 @@ func TestAggregatingTransportDoesNotFallbackForNonForbiddenErrors(t *testing.T) 
 	}
 }
 
+func TestAggregatingTransportKeepsSuccessfulAdministratorWatchNative(t *testing.T) {
+	var requests int
+	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		requests++
+		return jsonResponse(request, http.StatusOK, `{"type":"ADDED"}`), nil
+	})
+	resolver := &fakeNamespaceResolver{namespaces: []string{"team-a"}}
+	state := &aggregationState{mode: aggregateOnForbidden}
+	client := newAggregatingTestClient(t, base, resolver, state)
+
+	response, err := client.Get(
+		"https://example.test/proxy/clusters/member/api/v1/pods?watch=true",
+	)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	if requests != 1 || resolver.calls != 0 || state.used.Load() {
+		t.Fatalf(
+			"requests = %d, resolver calls = %d, used = %t; want 1, 0, false",
+			requests,
+			resolver.calls,
+			state.used.Load(),
+		)
+	}
+}
+
 func TestAggregatingTransportLeavesNonGetRequestAlone(t *testing.T) {
 	var requests int
 	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
@@ -859,10 +890,11 @@ func (r *fakeNamespaceResolver) Namespaces(
 }
 
 type transportTestGetter struct {
-	config *rest.Config
-	mapper meta.RESTMapper
-	loader clientcmd.ClientConfig
-	err    error
+	config    *rest.Config
+	mapper    meta.RESTMapper
+	loader    clientcmd.ClientConfig
+	discovery discovery.CachedDiscoveryInterface
+	err       error
 }
 
 func (g *transportTestGetter) ToRESTConfig() (*rest.Config, error) {
@@ -872,8 +904,11 @@ func (g *transportTestGetter) ToRESTConfig() (*rest.Config, error) {
 	return rest.CopyConfig(g.config), nil
 }
 
-func (*transportTestGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
-	return nil, nil
+func (g *transportTestGetter) ToDiscoveryClient() (
+	discovery.CachedDiscoveryInterface,
+	error,
+) {
+	return g.discovery, nil
 }
 
 func (g *transportTestGetter) ToRESTMapper() (meta.RESTMapper, error) {
