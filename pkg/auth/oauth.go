@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	internalrest "github.com/kubesphere/ksctl/internal/kubesphererest"
-	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
-	"github.com/kubesphere/ksctl/pkg/config"
 	kubesphererest "kubesphere.io/client-go/rest"
+	tokencache "kubesphere.io/ksctl/pkg/cache/token"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 type TokenRequestOptions struct {
@@ -74,11 +74,14 @@ func (o *OAuth) Logout(ctx context.Context, options LogoutOptions) error {
 		return fmt.Errorf("KubeSphere REST client factory is required")
 	}
 	config := &kubesphererest.Config{
-		Host:            options.Endpoint,
-		UserAgent:       options.UserAgent,
-		Timeout:         options.Timeout,
-		WarningHandler:  kubesphererest.NoWarnings{},
-		TLSClientConfig: internalrest.TLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
+		Host:           options.Endpoint,
+		UserAgent:      options.UserAgent,
+		Timeout:        options.Timeout,
+		WarningHandler: kubesphererest.NoWarnings{},
+		TLSClientConfig: clientkubesphere.TLSClientConfig(
+			options.TLSClientConfig,
+			options.InsecureSkipTLSVerify,
+		),
 	}
 	config.Wrap(redactLogoutResponses)
 	client, err := o.factory.ForConfig(config)
@@ -118,10 +121,13 @@ func (o *OAuth) requestToken(ctx context.Context, options TokenRequestOptions, f
 		return tokencache.Response{}, fmt.Errorf("KubeSphere REST client factory is required")
 	}
 	config := &kubesphererest.Config{
-		Host:            options.Endpoint,
-		UserAgent:       options.UserAgent,
-		Timeout:         options.Timeout,
-		TLSClientConfig: internalrest.TLSClientConfig(options.TLSClientConfig, options.InsecureSkipTLSVerify),
+		Host:      options.Endpoint,
+		UserAgent: options.UserAgent,
+		Timeout:   options.Timeout,
+		TLSClientConfig: clientkubesphere.TLSClientConfig(
+			options.TLSClientConfig,
+			options.InsecureSkipTLSVerify,
+		),
 	}
 	config.Wrap(redactOAuthErrorResponses)
 	client, err := o.factory.ForConfig(config)

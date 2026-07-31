@@ -7,40 +7,40 @@ import (
 	"strings"
 	"testing"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 func TestDiagnosePassesTargetAndPrintsIssuesInOrder(t *testing.T) {
 	streams, out, _ := bufferedStreams()
 	var gotName string
-	var gotOptions internalextension.DiagnoseOptions
+	var gotOptions kubesphereextension.DiagnoseOptions
 	service := &fakeService{
 		diagnoseFn: func(
 			_ context.Context,
 			name string,
-			options internalextension.DiagnoseOptions,
-		) (internalextension.Diagnosis, error) {
+			options kubesphereextension.DiagnoseOptions,
+		) (kubesphereextension.Diagnosis, error) {
 			gotName, gotOptions = name, options
-			return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{
+			return kubesphereextension.Diagnosis{Checks: []kubesphereextension.DiagnosticCheck{
 				{
 					Name:    "extension",
-					Status:  internalextension.DiagnosticOK,
+					Status:  kubesphereextension.DiagnosticOK,
 					Message: "extension exists",
 				},
 				{
 					Name:    "install-plan",
-					Status:  internalextension.DiagnosticInfo,
+					Status:  kubesphereextension.DiagnosticInfo,
 					Message: "install plan is active",
 				},
 				{
 					Name:    "job",
-					Status:  internalextension.DiagnosticWarn,
+					Status:  kubesphereextension.DiagnosticWarn,
 					Message: "Job was removed by TTL",
 				},
 				{
 					Name:    "workload",
-					Status:  internalextension.DiagnosticError,
+					Status:  kubesphereextension.DiagnosticError,
 					Message: "executor is unavailable",
 				},
 			}}, nil
@@ -58,7 +58,7 @@ func TestDiagnosePassesTargetAndPrintsIssuesInOrder(t *testing.T) {
 		streams,
 		func() (Service, error) { return service, nil },
 	)
-	if !errors.Is(err, internalextension.ErrDiagnosisFailed) {
+	if !errors.Is(err, kubesphereextension.ErrDiagnosisFailed) {
 		t.Fatalf("Execute() error = %v, want ErrDiagnosisFailed", err)
 	}
 	if gotName != "demo" ||
@@ -79,11 +79,11 @@ func TestDiagnoseHealthyDefaultPrintsSummaryOnly(t *testing.T) {
 	service := &fakeService{diagnoseFn: func(
 		context.Context,
 		string,
-		internalextension.DiagnoseOptions,
-	) (internalextension.Diagnosis, error) {
-		return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{
-			{Name: "extension", Status: internalextension.DiagnosticOK},
-			{Name: "install-plan", Status: internalextension.DiagnosticInfo},
+		kubesphereextension.DiagnoseOptions,
+	) (kubesphereextension.Diagnosis, error) {
+		return kubesphereextension.Diagnosis{Checks: []kubesphereextension.DiagnosticCheck{
+			{Name: "extension", Status: kubesphereextension.DiagnosticOK},
+			{Name: "install-plan", Status: kubesphereextension.DiagnosticInfo},
 		}}, nil
 	}}
 	err := executeExtensionCommand(
@@ -106,13 +106,13 @@ func TestDiagnoseVerbosePrintsEveryCheck(t *testing.T) {
 	service := &fakeService{diagnoseFn: func(
 		context.Context,
 		string,
-		internalextension.DiagnoseOptions,
-	) (internalextension.Diagnosis, error) {
-		return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{
-			{Name: "extension", Status: internalextension.DiagnosticOK, Message: "exists"},
-			{Name: "install-plan", Status: internalextension.DiagnosticInfo, Message: "active"},
-			{Name: "job", Status: internalextension.DiagnosticWarn, Message: "expired"},
-			{Name: "workload", Status: internalextension.DiagnosticError, Message: "unavailable"},
+		kubesphereextension.DiagnoseOptions,
+	) (kubesphereextension.Diagnosis, error) {
+		return kubesphereextension.Diagnosis{Checks: []kubesphereextension.DiagnosticCheck{
+			{Name: "extension", Status: kubesphereextension.DiagnosticOK, Message: "exists"},
+			{Name: "install-plan", Status: kubesphereextension.DiagnosticInfo, Message: "active"},
+			{Name: "job", Status: kubesphereextension.DiagnosticWarn, Message: "expired"},
+			{Name: "workload", Status: kubesphereextension.DiagnosticError, Message: "unavailable"},
 		}}, nil
 	}}
 	err := executeExtensionCommand(
@@ -121,7 +121,7 @@ func TestDiagnoseVerbosePrintsEveryCheck(t *testing.T) {
 		streams,
 		func() (Service, error) { return service, nil },
 	)
-	if !errors.Is(err, internalextension.ErrDiagnosisFailed) {
+	if !errors.Is(err, kubesphereextension.ErrDiagnosisFailed) {
 		t.Fatalf("Execute() error = %v, want ErrDiagnosisFailed", err)
 	}
 	if got, want := out.String(),
@@ -141,11 +141,11 @@ func TestDiagnosePrintsChecksBeforeDiagnosisFailure(t *testing.T) {
 		diagnoseFn: func(
 			context.Context,
 			string,
-			internalextension.DiagnoseOptions,
-		) (internalextension.Diagnosis, error) {
-			return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{{
+			kubesphereextension.DiagnoseOptions,
+		) (kubesphereextension.Diagnosis, error) {
+			return kubesphereextension.Diagnosis{Checks: []kubesphereextension.DiagnosticCheck{{
 				Name:    "install-plan",
-				Status:  internalextension.DiagnosticError,
+				Status:  kubesphereextension.DiagnosticError,
 				Message: "InstallFailed",
 			}}}, nil
 		},
@@ -156,7 +156,7 @@ func TestDiagnosePrintsChecksBeforeDiagnosisFailure(t *testing.T) {
 		streams,
 		func() (Service, error) { return service, nil },
 	)
-	if !errors.Is(err, internalextension.ErrDiagnosisFailed) {
+	if !errors.Is(err, kubesphereextension.ErrDiagnosisFailed) {
 		t.Fatalf("Execute() error = %v, want ErrDiagnosisFailed", err)
 	}
 	if !strings.Contains(out.String(), "install-plan  ERROR") {
@@ -171,11 +171,11 @@ func TestDiagnosePrintsAccumulatedChecksBeforeServiceError(t *testing.T) {
 		diagnoseFn: func(
 			context.Context,
 			string,
-			internalextension.DiagnoseOptions,
-		) (internalextension.Diagnosis, error) {
-			return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{{
+			kubesphereextension.DiagnoseOptions,
+		) (kubesphereextension.Diagnosis, error) {
+			return kubesphereextension.Diagnosis{Checks: []kubesphereextension.DiagnosticCheck{{
 				Name:    "extension",
-				Status:  internalextension.DiagnosticOK,
+				Status:  kubesphereextension.DiagnosticOK,
 				Message: "extension exists",
 			}}}, sentinel
 		},
@@ -253,11 +253,11 @@ func TestDiagnoseWrapsWriterError(t *testing.T) {
 		diagnoseFn: func(
 			context.Context,
 			string,
-			internalextension.DiagnoseOptions,
-		) (internalextension.Diagnosis, error) {
-			return internalextension.Diagnosis{Checks: []internalextension.DiagnosticCheck{{
+			kubesphereextension.DiagnoseOptions,
+		) (kubesphereextension.Diagnosis, error) {
+			return kubesphereextension.Diagnosis{Checks: []kubesphereextension.DiagnosticCheck{{
 				Name:    "extension",
-				Status:  internalextension.DiagnosticOK,
+				Status:  kubesphereextension.DiagnosticOK,
 				Message: "exists",
 			}}}, nil
 		},

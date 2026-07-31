@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 type waitFlags struct {
@@ -45,13 +45,13 @@ func (flags waitFlags) options(
 	action string,
 	name string,
 	errOut io.Writer,
-) *internalextension.PollOptions {
+) *kubesphereextension.PollOptions {
 	if !flags.wait {
 		return nil
 	}
-	return &internalextension.PollOptions{
+	return &kubesphereextension.PollOptions{
 		Timeout: flags.timeout,
-		OnState: func(event internalextension.StateEvent) error {
+		OnState: func(event kubesphereextension.StateEvent) error {
 			if _, err := fmt.Fprintf(
 				errOut,
 				"extension/%s state: %s\n",
@@ -158,7 +158,7 @@ func newInstallCommand(
 			operation, err := service.Install(
 				command.Context(),
 				args[0],
-				internalextension.InstallOptions{
+				kubesphereextension.InstallOptions{
 					Version:     version,
 					Config:      loaded.Config,
 					Clusters:    loaded.Clusters,
@@ -230,7 +230,7 @@ func newUpgradeCommand(
 			operation, err := service.Upgrade(
 				command.Context(),
 				args[0],
-				internalextension.UpgradeOptions{
+				kubesphereextension.UpgradeOptions{
 					Version:         version,
 					Changes:         config.planChanges(command, loaded),
 					RequireWaitable: wait.wait,
@@ -361,8 +361,8 @@ func finishLifecycle(
 	command *cobra.Command,
 	streams genericiooptions.IOStreams,
 	service Service,
-	operation internalextension.Operation,
-	waitOptions *internalextension.PollOptions,
+	operation kubesphereextension.Operation,
+	waitOptions *kubesphereextension.PollOptions,
 	action string,
 	requested string,
 	completed string,

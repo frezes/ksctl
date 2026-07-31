@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
 )
 
 func TestClientGetRoutesTenantResources(t *testing.T) {

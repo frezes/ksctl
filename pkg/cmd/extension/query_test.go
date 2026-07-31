@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 func executeExtensionCommand(
@@ -48,14 +48,14 @@ func bufferedStreams() (genericiooptions.IOStreams, *bytes.Buffer, *bytes.Buffer
 
 func TestListPassesFlagsAndPrintsTable(t *testing.T) {
 	streams, out, _ := bufferedStreams()
-	var gotOptions internalextension.ListOptions
+	var gotOptions kubesphereextension.ListOptions
 	service := &fakeService{
 		listFn: func(
 			_ context.Context,
-			options internalextension.ListOptions,
-		) (internalextension.ListResult, error) {
+			options kubesphereextension.ListOptions,
+		) (kubesphereextension.ListResult, error) {
 			gotOptions = options
-			return internalextension.ListResult{}, nil
+			return kubesphereextension.ListResult{}, nil
 		},
 	}
 	err := executeExtensionCommand(
@@ -73,7 +73,7 @@ func TestListPassesFlagsAndPrintsTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if want := (internalextension.ListOptions{
+	if want := (kubesphereextension.ListOptions{
 		Category:      "observability",
 		InstalledOnly: true,
 	}); !reflect.DeepEqual(gotOptions, want) {
@@ -93,13 +93,13 @@ func TestShowPassesOpaqueExactVersion(t *testing.T) {
 			_ context.Context,
 			name string,
 			version string,
-		) (internalextension.ShowResult, error) {
+		) (kubesphereextension.ShowResult, error) {
 			gotName, gotVersion = name, version
-			return internalextension.ShowResult{
-				SelectedVersion: &internalextension.Object[internalextension.ExtensionVersion]{
-					Value: internalextension.ExtensionVersion{
-						Metadata: internalextension.ObjectMeta{Name: "demo-v1"},
-						Spec: internalextension.ExtensionVersionSpec{
+			return kubesphereextension.ShowResult{
+				SelectedVersion: &kubesphereextension.Object[kubesphereextension.ExtensionVersion]{
+					Value: kubesphereextension.ExtensionVersion{
+						Metadata: kubesphereextension.ObjectMeta{Name: "demo-v1"},
+						Spec: kubesphereextension.ExtensionVersionSpec{
 							Version: version,
 						},
 					},
@@ -152,9 +152,9 @@ func TestVersionsAndStatusPassNames(t *testing.T) {
 			versionsFn: func(
 				_ context.Context,
 				name string,
-			) (internalextension.VersionsResult, error) {
+			) (kubesphereextension.VersionsResult, error) {
 				gotName = name
-				return internalextension.VersionsResult{}, nil
+				return kubesphereextension.VersionsResult{}, nil
 			},
 		}
 		err := executeExtensionCommand(
@@ -179,10 +179,10 @@ func TestVersionsAndStatusPassNames(t *testing.T) {
 			statusFn: func(
 				_ context.Context,
 				name string,
-			) (internalextension.StatusResult, error) {
+			) (kubesphereextension.StatusResult, error) {
 				gotName = name
-				list := internalextension.List[internalextension.InstallPlan]{}
-				return internalextension.StatusResult{List: &list}, nil
+				list := kubesphereextension.List[kubesphereextension.InstallPlan]{}
+				return kubesphereextension.StatusResult{List: &list}, nil
 			},
 		}
 		err := executeExtensionCommand(
@@ -264,12 +264,12 @@ func TestStatusWatchPrintsOneHeaderAndInitialDistinctStates(t *testing.T) {
 		watchFn: func(
 			_ context.Context,
 			name string,
-			options internalextension.PollOptions,
-		) (internalextension.Object[internalextension.InstallPlan], error) {
+			options kubesphereextension.PollOptions,
+		) (kubesphereextension.Object[kubesphereextension.InstallPlan], error) {
 			if name != "demo" || options.Timeout != 2*time.Minute {
 				t.Fatalf("Watch(%q, timeout=%s)", name, options.Timeout)
 			}
-			for _, event := range []internalextension.StateEvent{
+			for _, event := range []kubesphereextension.StateEvent{
 				{State: ""},
 				{
 					State:           "Preparing",
@@ -283,10 +283,10 @@ func TestStatusWatchPrintsOneHeaderAndInitialDistinctStates(t *testing.T) {
 				},
 			} {
 				if err := options.OnState(event); err != nil {
-					return internalextension.Object[internalextension.InstallPlan]{}, err
+					return kubesphereextension.Object[kubesphereextension.InstallPlan]{}, err
 				}
 			}
-			return internalextension.Object[internalextension.InstallPlan]{}, nil
+			return kubesphereextension.Object[kubesphereextension.InstallPlan]{}, nil
 		},
 	}
 	err := executeExtensionCommand(
@@ -329,9 +329,9 @@ func TestQueryServiceErrorsEmitNoStdout(t *testing.T) {
 			args: []string{"extension", "list"},
 			service: &fakeService{listFn: func(
 				context.Context,
-				internalextension.ListOptions,
-			) (internalextension.ListResult, error) {
-				return internalextension.ListResult{}, sentinel
+				kubesphereextension.ListOptions,
+			) (kubesphereextension.ListResult, error) {
+				return kubesphereextension.ListResult{}, sentinel
 			}},
 		},
 		{
@@ -341,8 +341,8 @@ func TestQueryServiceErrorsEmitNoStdout(t *testing.T) {
 				context.Context,
 				string,
 				string,
-			) (internalextension.ShowResult, error) {
-				return internalextension.ShowResult{}, sentinel
+			) (kubesphereextension.ShowResult, error) {
+				return kubesphereextension.ShowResult{}, sentinel
 			}},
 		},
 		{
@@ -351,8 +351,8 @@ func TestQueryServiceErrorsEmitNoStdout(t *testing.T) {
 			service: &fakeService{versionsFn: func(
 				context.Context,
 				string,
-			) (internalextension.VersionsResult, error) {
-				return internalextension.VersionsResult{}, sentinel
+			) (kubesphereextension.VersionsResult, error) {
+				return kubesphereextension.VersionsResult{}, sentinel
 			}},
 		},
 		{
@@ -361,8 +361,8 @@ func TestQueryServiceErrorsEmitNoStdout(t *testing.T) {
 			service: &fakeService{statusFn: func(
 				context.Context,
 				string,
-			) (internalextension.StatusResult, error) {
-				return internalextension.StatusResult{}, sentinel
+			) (kubesphereextension.StatusResult, error) {
+				return kubesphereextension.StatusResult{}, sentinel
 			}},
 		},
 	} {
@@ -394,9 +394,9 @@ func TestQueryWrapsOutputWriterFailures(t *testing.T) {
 	service := &fakeService{
 		listFn: func(
 			context.Context,
-			internalextension.ListOptions,
-		) (internalextension.ListResult, error) {
-			return internalextension.ListResult{}, nil
+			kubesphereextension.ListOptions,
+		) (kubesphereextension.ListResult, error) {
+			return kubesphereextension.ListResult{}, nil
 		},
 	}
 	err := executeExtensionCommand(

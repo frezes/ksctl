@@ -1,4 +1,4 @@
-module github.com/kubesphere/ksctl
+module kubesphere.io/ksctl
 
 go 1.26.0
 

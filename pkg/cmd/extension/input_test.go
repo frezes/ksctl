@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 func writeInputFile(t testing.TB, name, content string) string {
@@ -45,15 +45,15 @@ func TestInputReadsFileAndStdinWithoutChangingBytes(t *testing.T) {
 func TestInputOverrideSplitsAtFirstEquals(t *testing.T) {
 	path := writeInputFile(t, "values=production.yaml", "enabled: true\n")
 	streams, _, _ := bufferedStreams()
-	var got internalextension.InstallOptions
+	var got kubesphereextension.InstallOptions
 	service := &fakeService{
 		installFn: func(
 			_ context.Context,
 			_ string,
-			options internalextension.InstallOptions,
-		) (internalextension.Operation, error) {
+			options kubesphereextension.InstallOptions,
+		) (kubesphereextension.Operation, error) {
 			got = options
-			return internalextension.Operation{}, nil
+			return kubesphereextension.Operation{}, nil
 		},
 	}
 	err := executeExtensionCommand(
@@ -198,15 +198,15 @@ func TestInputRejectsSetAndRemoveForSameCluster(t *testing.T) {
 func TestInputPlanChangesUseFlagPresence(t *testing.T) {
 	path := writeInputFile(t, "values.yaml", "enabled: true\n")
 	streams, _, _ := bufferedStreams()
-	var got internalextension.PlanChanges
+	var got kubesphereextension.PlanChanges
 	service := &fakeService{
 		configureFn: func(
 			_ context.Context,
 			_ string,
-			changes internalextension.PlanChanges,
-		) (internalextension.Operation, error) {
+			changes kubesphereextension.PlanChanges,
+		) (kubesphereextension.Operation, error) {
 			got = changes
-			return internalextension.Operation{}, nil
+			return kubesphereextension.Operation{}, nil
 		},
 	}
 	err := executeExtensionCommand(
@@ -223,13 +223,13 @@ func TestInputPlanChangesUseFlagPresence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	want := internalextension.PlanChanges{
-		Config: internalextension.StringChange{
-			Mode:  internalextension.Replace,
+	want := kubesphereextension.PlanChanges{
+		Config: kubesphereextension.StringChange{
+			Mode:  kubesphereextension.Replace,
 			Value: "enabled: true\n",
 		},
-		Scheduling: internalextension.SchedulingChange{
-			Mode:            internalextension.Replace,
+		Scheduling: kubesphereextension.SchedulingChange{
+			Mode:            kubesphereextension.Replace,
 			Clusters:        []string{"member-a", "member-b"},
 			SetOverrides:    map[string]string{},
 			RemoveOverrides: []string{"member-b"},

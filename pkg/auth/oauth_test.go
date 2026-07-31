@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
-	"github.com/kubesphere/ksctl/pkg/config"
 	"k8s.io/klog/v2"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TestLoginUsesKubeSphereOAuthTokenEndpoint(t *testing.T) {

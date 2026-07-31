@@ -5,18 +5,18 @@ import (
 	"io"
 	"sync"
 
-	"github.com/kubesphere/ksctl/pkg/auth"
-	clientoptions "github.com/kubesphere/ksctl/pkg/client"
-	clientkubernetes "github.com/kubesphere/ksctl/pkg/client/kubernetes"
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
-	clientkubesphereconnection "github.com/kubesphere/ksctl/pkg/client/kubesphere/connection"
-	plugincmd "github.com/kubesphere/ksctl/pkg/cmd/plugin"
-	tenantcmd "github.com/kubesphere/ksctl/pkg/cmd/tenant"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 	kubectli18n "k8s.io/kubectl/pkg/util/i18n"
+	"kubesphere.io/ksctl/pkg/auth"
+	clientoptions "kubesphere.io/ksctl/pkg/client"
+	clientkubernetes "kubesphere.io/ksctl/pkg/client/kubernetes"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	clientkubesphereconnection "kubesphere.io/ksctl/pkg/client/kubesphere/connection"
+	plugincmd "kubesphere.io/ksctl/pkg/cmd/plugin"
+	tenantcmd "kubesphere.io/ksctl/pkg/cmd/tenant"
 )
 
 var (

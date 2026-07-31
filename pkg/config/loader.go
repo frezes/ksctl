@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kubesphere/ksctl/internal/securefile"
+	"kubesphere.io/ksctl/pkg/securefile"
 	"sigs.k8s.io/yaml"
 )
 

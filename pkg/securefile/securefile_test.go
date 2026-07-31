@@ -1,5 +1,7 @@
 package securefile
 
+// These tests preserve secure-write behavior across the package move.
+
 import (
 	"os"
 	"path/filepath"

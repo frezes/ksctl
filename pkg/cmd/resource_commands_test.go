@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	tokencache "github.com/kubesphere/ksctl/pkg/cache/token"
-	"github.com/kubesphere/ksctl/pkg/config"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	tokencache "kubesphere.io/ksctl/pkg/cache/token"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TestNativeTopPodUsesFallbackDiscoveryThroughSpecifiedCluster(t *testing.T) {

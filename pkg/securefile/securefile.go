@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 )
 
+// Write atomically replaces path with private file permissions.
 func Write(path string, data []byte) (retErr error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

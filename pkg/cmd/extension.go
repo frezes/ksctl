@@ -3,12 +3,12 @@ package cmd
 import (
 	"fmt"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
-	extensioncmd "github.com/kubesphere/ksctl/pkg/cmd/extension"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
+	extensioncmd "kubesphere.io/ksctl/pkg/cmd/extension"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 type extensionRESTConfigGetter interface {
@@ -49,8 +49,8 @@ func newExtensionCommand(
 					err,
 				)
 			}
-			return internalextension.NewService(
-				internalextension.NewRESTClient(restClient),
+			return kubesphereextension.NewService(
+				kubesphereextension.NewRESTClient(restClient),
 			), nil
 		},
 	)

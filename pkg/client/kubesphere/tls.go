@@ -1,8 +1,8 @@
-package kubesphererest
+package kubesphere
 
 import (
-	"github.com/kubesphere/ksctl/pkg/config"
 	ksrest "kubesphere.io/client-go/rest"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TLSClientConfig(cfg config.TLSClientConfig, insecureOverride bool) ksrest.TLSClientConfig {

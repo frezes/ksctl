@@ -2,7 +2,7 @@
 
 GO ?= go
 VERSION ?= dev
-LDFLAGS := -s -w -X github.com/kubesphere/ksctl/pkg/cmd.version=$(VERSION)
+LDFLAGS := -s -w -X kubesphere.io/ksctl/pkg/cmd.version=$(VERSION)
 
 build:
 	@mkdir -p bin

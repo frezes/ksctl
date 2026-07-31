@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubesphere/ksctl/pkg/auth"
-	clientoptions "github.com/kubesphere/ksctl/pkg/client"
-	"github.com/kubesphere/ksctl/pkg/config"
+	"kubesphere.io/ksctl/pkg/auth"
+	clientoptions "kubesphere.io/ksctl/pkg/client"
+	"kubesphere.io/ksctl/pkg/config"
 )
 
 func TestRESTClientGetterBuildsNativeKubeSphereConfig(t *testing.T) {

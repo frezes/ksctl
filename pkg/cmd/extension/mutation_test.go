@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 )
 
 func TestLifecycleFlagValidationBeforeFactory(t *testing.T) {
@@ -155,16 +155,16 @@ func TestInstallExposesNoClearFlags(t *testing.T) {
 
 func TestInstallPassesEmptyVersionForServiceResolution(t *testing.T) {
 	streams, _, _ := bufferedStreams()
-	var got internalextension.InstallOptions
+	var got kubesphereextension.InstallOptions
 	service := &fakeService{
 		installFn: func(
 			_ context.Context,
 			_ string,
-			options internalextension.InstallOptions,
-		) (internalextension.Operation, error) {
+			options kubesphereextension.InstallOptions,
+		) (kubesphereextension.Operation, error) {
 			got = options
-			return internalextension.Operation{
-				Kind:          internalextension.OperationInstall,
+			return kubesphereextension.Operation{
+				Kind:          kubesphereextension.OperationInstall,
 				Name:          "demo",
 				TargetVersion: "1.2.1",
 			}, nil
@@ -228,15 +228,15 @@ func TestInstallRejectsExplicitEmptyVersionBeforeFactory(t *testing.T) {
 
 func TestInstallPassesAllClustersToService(t *testing.T) {
 	streams, _, _ := bufferedStreams()
-	var got internalextension.InstallOptions
+	var got kubesphereextension.InstallOptions
 	service := &fakeService{installFn: func(
 		_ context.Context,
 		_ string,
-		options internalextension.InstallOptions,
-	) (internalextension.Operation, error) {
+		options kubesphereextension.InstallOptions,
+	) (kubesphereextension.Operation, error) {
 		got = options
-		return internalextension.Operation{
-			Kind:          internalextension.OperationInstall,
+		return kubesphereextension.Operation{
+			Kind:          kubesphereextension.OperationInstall,
 			Name:          "demo",
 			TargetVersion: "1.2.1",
 		}, nil
@@ -295,28 +295,28 @@ func TestInstallDefaultsToAsyncAndPassesExactInputs(t *testing.T) {
 	overridePath := writeInputFile(t, "override.yaml", "key: member\n")
 	streams, out, errOut := bufferedStreams()
 	var gotName string
-	var gotOptions internalextension.InstallOptions
+	var gotOptions kubesphereextension.InstallOptions
 	waitCalled := false
 	service := &fakeService{
 		installFn: func(
 			_ context.Context,
 			name string,
-			options internalextension.InstallOptions,
-		) (internalextension.Operation, error) {
+			options kubesphereextension.InstallOptions,
+		) (kubesphereextension.Operation, error) {
 			gotName, gotOptions = name, options
-			return internalextension.Operation{
-				Kind:          internalextension.OperationInstall,
+			return kubesphereextension.Operation{
+				Kind:          kubesphereextension.OperationInstall,
 				Name:          name,
 				TargetVersion: options.Version,
 			}, nil
 		},
 		waitFn: func(
 			context.Context,
-			internalextension.Operation,
-			internalextension.PollOptions,
-		) (internalextension.WaitResult, error) {
+			kubesphereextension.Operation,
+			kubesphereextension.PollOptions,
+		) (kubesphereextension.WaitResult, error) {
 			waitCalled = true
-			return internalextension.WaitResult{}, nil
+			return kubesphereextension.WaitResult{}, nil
 		},
 	}
 	err := executeExtensionCommand(
@@ -335,7 +335,7 @@ func TestInstallDefaultsToAsyncAndPassesExactInputs(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	config := "key: value\r\n"
-	want := internalextension.InstallOptions{
+	want := kubesphereextension.InstallOptions{
 		Version:   "v1.2.1+build",
 		Config:    &config,
 		Clusters:  []string{"member-a", "member-b"},
@@ -358,15 +358,15 @@ func TestInstallDefaultsToAsyncAndPassesExactInputs(t *testing.T) {
 func TestUpgradeAndConfigurePassPlanChanges(t *testing.T) {
 	t.Run("upgrade clear fields", func(t *testing.T) {
 		streams, out, _ := bufferedStreams()
-		var got internalextension.UpgradeOptions
+		var got kubesphereextension.UpgradeOptions
 		service := &fakeService{
 			upgradeFn: func(
 				_ context.Context,
 				_ string,
-				options internalextension.UpgradeOptions,
-			) (internalextension.Operation, error) {
+				options kubesphereextension.UpgradeOptions,
+			) (kubesphereextension.Operation, error) {
 				got = options
-				return internalextension.Operation{}, nil
+				return kubesphereextension.Operation{}, nil
 			},
 		}
 		err := executeExtensionCommand(
@@ -383,14 +383,14 @@ func TestUpgradeAndConfigurePassPlanChanges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute() error = %v", err)
 		}
-		want := internalextension.UpgradeOptions{
+		want := kubesphereextension.UpgradeOptions{
 			Version: "2.0.0",
-			Changes: internalextension.PlanChanges{
-				Config: internalextension.StringChange{
-					Mode: internalextension.Clear,
+			Changes: kubesphereextension.PlanChanges{
+				Config: kubesphereextension.StringChange{
+					Mode: kubesphereextension.Clear,
 				},
-				Scheduling: internalextension.SchedulingChange{
-					Mode:            internalextension.Clear,
+				Scheduling: kubesphereextension.SchedulingChange{
+					Mode:            kubesphereextension.Clear,
 					SetOverrides:    map[string]string{},
 					RemoveOverrides: []string{},
 				},
@@ -406,15 +406,15 @@ func TestUpgradeAndConfigurePassPlanChanges(t *testing.T) {
 
 	t.Run("configure remove override", func(t *testing.T) {
 		streams, out, _ := bufferedStreams()
-		var got internalextension.PlanChanges
+		var got kubesphereextension.PlanChanges
 		service := &fakeService{
 			configureFn: func(
 				_ context.Context,
 				_ string,
-				changes internalextension.PlanChanges,
-			) (internalextension.Operation, error) {
+				changes kubesphereextension.PlanChanges,
+			) (kubesphereextension.Operation, error) {
 				got = changes
-				return internalextension.Operation{}, nil
+				return kubesphereextension.Operation{}, nil
 			},
 		}
 		err := executeExtensionCommand(
@@ -442,15 +442,15 @@ func TestUpgradeAndConfigurePassPlanChanges(t *testing.T) {
 
 	t.Run("configure explicit empty placement", func(t *testing.T) {
 		streams, _, _ := bufferedStreams()
-		var got internalextension.PlanChanges
+		var got kubesphereextension.PlanChanges
 		service := &fakeService{
 			configureFn: func(
 				_ context.Context,
 				_ string,
-				changes internalextension.PlanChanges,
-			) (internalextension.Operation, error) {
+				changes kubesphereextension.PlanChanges,
+			) (kubesphereextension.Operation, error) {
 				got = changes
-				return internalextension.Operation{}, nil
+				return kubesphereextension.Operation{}, nil
 			},
 		}
 		err := executeExtensionCommand(
@@ -465,7 +465,7 @@ func TestUpgradeAndConfigurePassPlanChanges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute() error = %v", err)
 		}
-		if got.Scheduling.Mode != internalextension.Replace ||
+		if got.Scheduling.Mode != kubesphereextension.Replace ||
 			len(got.Scheduling.Clusters) != 0 {
 			t.Fatalf("changes = %#v", got)
 		}
@@ -479,9 +479,9 @@ func TestUninstallIsDirectAndAsyncByDefault(t *testing.T) {
 		uninstallFn: func(
 			_ context.Context,
 			name string,
-		) (internalextension.Operation, error) {
+		) (kubesphereextension.Operation, error) {
 			gotName = name
-			return internalextension.Operation{}, nil
+			return kubesphereextension.Operation{}, nil
 		},
 	}
 	err := executeExtensionCommand(
@@ -505,23 +505,23 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		args        []string
-		operation   internalextension.OperationKind
+		operation   kubesphereextension.OperationKind
 		finalOutput string
 		service     func(*testing.T) *fakeService
 	}{
 		{
 			name:        "install",
 			args:        []string{"extension", "install", "demo", "--version", "1.2.1"},
-			operation:   internalextension.OperationInstall,
+			operation:   kubesphereextension.OperationInstall,
 			finalOutput: "extension/demo installed\n",
 			service: func(t *testing.T) *fakeService {
 				return &fakeService{installFn: func(
 					context.Context,
 					string,
-					internalextension.InstallOptions,
-				) (internalextension.Operation, error) {
-					return internalextension.Operation{
-						Kind: internalextension.OperationInstall,
+					kubesphereextension.InstallOptions,
+				) (kubesphereextension.Operation, error) {
+					return kubesphereextension.Operation{
+						Kind: kubesphereextension.OperationInstall,
 						Name: "demo",
 					}, nil
 				}}
@@ -530,19 +530,19 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 		{
 			name:        "upgrade",
 			args:        []string{"extension", "upgrade", "demo", "--version", "1.2.1"},
-			operation:   internalextension.OperationUpgrade,
+			operation:   kubesphereextension.OperationUpgrade,
 			finalOutput: "extension/demo upgraded\n",
 			service: func(t *testing.T) *fakeService {
 				return &fakeService{upgradeFn: func(
 					_ context.Context,
 					_ string,
-					options internalextension.UpgradeOptions,
-				) (internalextension.Operation, error) {
+					options kubesphereextension.UpgradeOptions,
+				) (kubesphereextension.Operation, error) {
 					if !options.RequireWaitable {
 						t.Fatal("upgrade did not require waitable placement")
 					}
-					return internalextension.Operation{
-						Kind: internalextension.OperationUpgrade,
+					return kubesphereextension.Operation{
+						Kind: kubesphereextension.OperationUpgrade,
 						Name: "demo",
 					}, nil
 				}}
@@ -551,19 +551,19 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 		{
 			name:        "configure",
 			args:        []string{"extension", "configure", "demo", "--clear-config"},
-			operation:   internalextension.OperationConfigure,
+			operation:   kubesphereextension.OperationConfigure,
 			finalOutput: "extension/demo configured\n",
 			service: func(t *testing.T) *fakeService {
 				return &fakeService{configureFn: func(
 					_ context.Context,
 					_ string,
-					changes internalextension.PlanChanges,
-				) (internalextension.Operation, error) {
+					changes kubesphereextension.PlanChanges,
+				) (kubesphereextension.Operation, error) {
 					if !changes.RequireWaitable {
 						t.Fatal("configure did not require waitable placement")
 					}
-					return internalextension.Operation{
-						Kind: internalextension.OperationConfigure,
+					return kubesphereextension.Operation{
+						Kind: kubesphereextension.OperationConfigure,
 						Name: "demo",
 					}, nil
 				}}
@@ -572,15 +572,15 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 		{
 			name:        "uninstall",
 			args:        []string{"extension", "uninstall", "demo"},
-			operation:   internalextension.OperationUninstall,
+			operation:   kubesphereextension.OperationUninstall,
 			finalOutput: "extension/demo uninstalled\n",
 			service: func(t *testing.T) *fakeService {
 				return &fakeService{uninstallFn: func(
 					context.Context,
 					string,
-				) (internalextension.Operation, error) {
-					return internalextension.Operation{
-						Kind: internalextension.OperationUninstall,
+				) (kubesphereextension.Operation, error) {
+					return kubesphereextension.Operation{
+						Kind: kubesphereextension.OperationUninstall,
 						Name: "demo",
 					}, nil
 				}}
@@ -592,9 +592,9 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 			service := test.service(t)
 			service.waitFn = func(
 				_ context.Context,
-				operation internalextension.Operation,
-				options internalextension.PollOptions,
-			) (internalextension.WaitResult, error) {
+				operation kubesphereextension.Operation,
+				options kubesphereextension.PollOptions,
+			) (kubesphereextension.WaitResult, error) {
 				if operation.Kind != test.operation ||
 					options.Timeout != 2*time.Minute {
 					t.Fatalf(
@@ -603,16 +603,16 @@ func TestLifecycleWaitIsExplicitAndPrintsProgressThenSuccess(t *testing.T) {
 						options.Timeout,
 					)
 				}
-				for _, event := range []internalextension.StateEvent{
+				for _, event := range []kubesphereextension.StateEvent{
 					{State: ""},
 					{State: "Installing"},
 					{State: "Installed"},
 				} {
 					if err := options.OnState(event); err != nil {
-						return internalextension.WaitResult{}, err
+						return kubesphereextension.WaitResult{}, err
 					}
 				}
-				return internalextension.WaitResult{}, nil
+				return kubesphereextension.WaitResult{}, nil
 			}
 			args := append(
 				append([]string(nil), test.args...),
@@ -650,9 +650,9 @@ func TestLifecycleServiceErrorsEmitNoSuccessOutput(t *testing.T) {
 		installFn: func(
 			context.Context,
 			string,
-			internalextension.InstallOptions,
-		) (internalextension.Operation, error) {
-			return internalextension.Operation{}, sentinel
+			kubesphereextension.InstallOptions,
+		) (kubesphereextension.Operation, error) {
+			return kubesphereextension.Operation{}, sentinel
 		},
 	}
 	err := executeExtensionCommand(
@@ -675,9 +675,9 @@ func TestLifecycleWrapsOutputAndProgressWriterFailures(t *testing.T) {
 		service := &fakeService{installFn: func(
 			context.Context,
 			string,
-			internalextension.InstallOptions,
-		) (internalextension.Operation, error) {
-			return internalextension.Operation{}, nil
+			kubesphereextension.InstallOptions,
+		) (kubesphereextension.Operation, error) {
+			return kubesphereextension.Operation{}, nil
 		}}
 		err := executeExtensionCommand(
 			t,
@@ -701,20 +701,20 @@ func TestLifecycleWrapsOutputAndProgressWriterFailures(t *testing.T) {
 			installFn: func(
 				context.Context,
 				string,
-				internalextension.InstallOptions,
-			) (internalextension.Operation, error) {
-				return internalextension.Operation{
-					Kind: internalextension.OperationInstall,
+				kubesphereextension.InstallOptions,
+			) (kubesphereextension.Operation, error) {
+				return kubesphereextension.Operation{
+					Kind: kubesphereextension.OperationInstall,
 					Name: "demo",
 				}, nil
 			},
 			waitFn: func(
 				_ context.Context,
-				_ internalextension.Operation,
-				options internalextension.PollOptions,
-			) (internalextension.WaitResult, error) {
-				return internalextension.WaitResult{}, options.OnState(
-					internalextension.StateEvent{State: "Installing"},
+				_ kubesphereextension.Operation,
+				options kubesphereextension.PollOptions,
+			) (kubesphereextension.WaitResult, error) {
+				return kubesphereextension.WaitResult{}, options.OnState(
+					kubesphereextension.StateEvent{State: "Installing"},
 				)
 			},
 		}

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
 )
 
 type apiRESTConfigGetterFunc func() (*kubesphererest.Config, error)

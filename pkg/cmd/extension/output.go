@@ -12,8 +12,8 @@ import (
 	"text/tabwriter"
 	"unicode"
 
-	internalextension "github.com/kubesphere/ksctl/internal/extension"
 	"k8s.io/cli-runtime/pkg/printers"
+	kubesphereextension "kubesphere.io/ksctl/pkg/kubesphere/extension"
 	"sigs.k8s.io/yaml"
 )
 
@@ -106,7 +106,7 @@ func appendNonEmptyRow(rows *[][]string, field, value string) {
 
 func printList(
 	out io.Writer,
-	result internalextension.ListResult,
+	result kubesphereextension.ListResult,
 	format outputFormat,
 ) error {
 	headers := []string{
@@ -152,7 +152,7 @@ func printList(
 	return writeTable(out, rows)
 }
 
-func extensionCategory(extension internalextension.Extension) string {
+func extensionCategory(extension kubesphereextension.Extension) string {
 	if category := extension.Metadata.Labels["kubesphere.io/category"]; category != "" {
 		return category
 	}
@@ -160,7 +160,7 @@ func extensionCategory(extension internalextension.Extension) string {
 }
 
 func providerName(
-	providers map[string]*internalextension.Provider,
+	providers map[string]*kubesphereextension.Provider,
 ) string {
 	provider := localizedProvider(providers)
 	if provider == nil {
@@ -170,8 +170,8 @@ func providerName(
 }
 
 func localizedProvider(
-	providers map[string]*internalextension.Provider,
-) *internalextension.Provider {
+	providers map[string]*kubesphereextension.Provider,
+) *kubesphereextension.Provider {
 	for _, key := range []string{"en", "en-US", "zh", "zh-CN"} {
 		if provider := providers[key]; provider != nil {
 			return provider
@@ -186,7 +186,7 @@ func localizedProvider(
 }
 
 func providerDetail(
-	providers map[string]*internalextension.Provider,
+	providers map[string]*kubesphereextension.Provider,
 ) string {
 	provider := localizedProvider(providers)
 	if provider == nil {
@@ -217,7 +217,7 @@ func optionalBool(value *bool) string {
 
 func printShow(
 	out io.Writer,
-	result internalextension.ShowResult,
+	result kubesphereextension.ShowResult,
 	format outputFormat,
 ) error {
 	if result.SelectedVersion != nil {
@@ -288,7 +288,7 @@ func printShow(
 
 func printClusterSchedulingStatuses(
 	out io.Writer,
-	statuses map[string]internalextension.InstallationStatus,
+	statuses map[string]kubesphereextension.InstallationStatus,
 	format outputFormat,
 ) error {
 	if len(statuses) == 0 {
@@ -327,7 +327,7 @@ func successfulPlanState(state string) bool {
 
 func printSelectedVersion(
 	out io.Writer,
-	result internalextension.ShowResult,
+	result kubesphereextension.ShowResult,
 ) error {
 	version := result.SelectedVersion.Value
 	extensionName := version.Metadata.Labels["kubesphere.io/extension-ref"]
@@ -363,7 +363,7 @@ func stringList(values []string) string {
 	return strings.Join(filtered, ", ")
 }
 
-func formatConditions(conditions []internalextension.Condition) string {
+func formatConditions(conditions []kubesphereextension.Condition) string {
 	values := make([]string, 0, len(conditions))
 	for _, condition := range conditions {
 		value := condition.Type + "=" + condition.Status
@@ -380,7 +380,7 @@ func formatConditions(conditions []internalextension.Condition) string {
 }
 
 func formatDependencies(
-	dependencies []internalextension.ExternalDependency,
+	dependencies []kubesphereextension.ExternalDependency,
 ) string {
 	values := make([]string, 0, len(dependencies))
 	for _, dependency := range dependencies {
@@ -401,7 +401,7 @@ func formatDependencies(
 
 func printVersions(
 	out io.Writer,
-	result internalextension.VersionsResult,
+	result kubesphereextension.VersionsResult,
 ) error {
 	rows := make([][]string, 0, len(result.Items.Items)+1)
 	rows = append(rows, []string{
@@ -426,7 +426,7 @@ func printVersions(
 
 func printStatus(
 	out io.Writer,
-	result internalextension.StatusResult,
+	result kubesphereextension.StatusResult,
 ) error {
 	rows := [][]string{{
 		"NAME",
@@ -446,7 +446,7 @@ func printStatus(
 	return writeTable(out, rows)
 }
 
-func namedStatusRows(plan internalextension.InstallPlan) [][]string {
+func namedStatusRows(plan kubesphereextension.InstallPlan) [][]string {
 	rows := [][]string{hostStatusRow(plan)}
 	for _, cluster := range slices.Sorted(
 		maps.Keys(plan.Status.ClusterSchedulingStatuses),
@@ -464,7 +464,7 @@ func namedStatusRows(plan internalextension.InstallPlan) [][]string {
 	return rows
 }
 
-func hostStatusRow(plan internalextension.InstallPlan) []string {
+func hostStatusRow(plan kubesphereextension.InstallPlan) []string {
 	version := plan.Status.Version
 	if version == "" {
 		version = plan.Spec.Extension.Version
@@ -479,7 +479,7 @@ func hostStatusRow(plan internalextension.InstallPlan) []string {
 	}
 }
 
-func installPlanEnabled(plan internalextension.InstallPlan) string {
+func installPlanEnabled(plan kubesphereextension.InstallPlan) string {
 	if plan.Status.Enabled != nil {
 		return optionalBool(plan.Status.Enabled)
 	}
@@ -493,7 +493,7 @@ func printWatchHeader(out io.Writer) error {
 
 func printWatchRow(
 	out io.Writer,
-	event internalextension.StateEvent,
+	event kubesphereextension.StateEvent,
 ) error {
 	_, err := fmt.Fprintf(
 		out,

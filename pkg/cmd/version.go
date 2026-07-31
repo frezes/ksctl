@@ -7,10 +7,10 @@ import (
 	"strings"
 	"unicode"
 
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/rest"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
 )
 
 var version = "dev"

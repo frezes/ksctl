@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	clientkubesphere "github.com/kubesphere/ksctl/pkg/client/kubesphere"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	types "k8s.io/apimachinery/pkg/types"
 	kubesphererest "kubesphere.io/client-go/rest"
+	clientkubesphere "kubesphere.io/ksctl/pkg/client/kubesphere"
 )
 
 func newTestAPIClient(t *testing.T, handler http.Handler, mutate func(*kubesphererest.Config)) APIClient {
