@@ -80,141 +80,32 @@ func (s *Service) Diagnose(
 		}
 	}
 
-	extension, err := s.client.GetExtension(ctx, name)
-	switch {
-	case err == nil:
-		diagnosis.add(
-			"extension",
-			diagnosticState(extension.Value.Status.State),
-			extensionDiagnosticMessage(extension.Value),
-		)
-	case apierrors.IsNotFound(err):
-		diagnosis.add(
-			"extension",
-			DiagnosticError,
-			fmt.Sprintf("extension %q was not found", name),
-		)
-	default:
-		return diagnosis, fmt.Errorf("diagnose extension %q: %w", name, err)
+	if err := s.diagnoseExtension(ctx, &diagnosis, name); err != nil {
+		return diagnosis, err
 	}
 
-	planObject, err := s.client.GetInstallPlan(ctx, name)
-	switch {
-	case err == nil:
-	case apierrors.IsNotFound(err):
-		diagnosis.add(
-			"install-plan",
-			DiagnosticError,
-			fmt.Sprintf("InstallPlan %q was not found", name),
-		)
-		return diagnosis, nil
-	default:
-		return diagnosis, fmt.Errorf(
-			"diagnose extension %q InstallPlan: %w",
-			name,
-			err,
-		)
+	plan, err := s.diagnoseInstallPlan(ctx, &diagnosis, name)
+	if err != nil {
+		return diagnosis, err
 	}
-	plan := planObject.Value
-	if err := ensurePlanIdentity(name, plan); err != nil {
-		diagnosis.add("install-plan", DiagnosticError, err.Error())
+	if plan == nil {
 		return diagnosis, nil
 	}
 
-	selected := plan.Status.InstallationStatus
-	selectedAvailable := true
-	selectedScope := "host"
-	if options.TargetCluster != "" {
-		selectedScope = "cluster/" + options.TargetCluster
-		var found bool
-		selected, found = plan.Status.ClusterSchedulingStatuses[options.TargetCluster]
-		selectedAvailable = found
-	}
-	if !selectedAvailable {
-		message := fmt.Sprintf(
-			"scope=%s; no status was found",
-			selectedScope,
-		)
-		if plan.Metadata.DeletionTimestamp != nil {
-			message += "; InstallPlan is deleting"
-		}
-		diagnosis.add(
-			"install-plan",
-			DiagnosticError,
-			message,
-		)
-	} else {
-		status := diagnosticState(selected.State)
-		message := installPlanDiagnosticMessage(selectedScope, selected)
-		if plan.Metadata.DeletionTimestamp != nil {
-			status = DiagnosticError
-			message += "; InstallPlan is deleting"
-		}
-		diagnosis.add(
-			"install-plan",
-			status,
-			message,
-		)
-	}
+	selected, selectedAvailable := diagnoseInstallPlanStatus(
+		&diagnosis,
+		*plan,
+		options.TargetCluster,
+	)
 
-	var selectedVersion *Object[ExtensionVersion]
-	targetVersion := plan.Spec.Extension.Version
-	if strings.TrimSpace(targetVersion) == "" {
-		diagnosis.add(
-			"version",
-			DiagnosticError,
-			"controller target version is not specified",
-		)
-	} else {
-		resourceName := name + "-" + targetVersion
-		version, getErr := s.client.GetExtensionVersion(
-			ctx,
-			resourceName,
-		)
-		if getErr != nil && !apierrors.IsNotFound(getErr) {
-			return diagnosis, fmt.Errorf(
-				"diagnose extension %q ExtensionVersion %q: %w",
-				name,
-				resourceName,
-				getErr,
-			)
-		}
-		identityErr := error(nil)
-		if getErr == nil {
-			identityErr = ensureControllerVersionIdentity(
-				name,
-				targetVersion,
-				version.Value,
-			)
-		}
-		switch {
-		case apierrors.IsNotFound(getErr):
-			diagnosis.add(
-				"version",
-				DiagnosticError,
-				fmt.Sprintf(
-					"controller target ExtensionVersion resource %q was not found",
-					resourceName,
-				),
-			)
-		case identityErr != nil:
-			diagnosis.add(
-				"version",
-				DiagnosticError,
-				identityErr.Error(),
-			)
-		default:
-			copy := version
-			selectedVersion = &copy
-			diagnosis.add(
-				"version",
-				DiagnosticOK,
-				fmt.Sprintf(
-					"controller target ExtensionVersion %q is available",
-					targetVersion,
-				),
-			)
-		}
+	selectedVersion, err := s.diagnoseVersion(
+		ctx,
+		&diagnosis,
+		name,
+		plan.Spec.Extension.Version,
+	)
+	if err != nil {
+		return diagnosis, err
 	}
 
 	if selectedVersion != nil {
@@ -248,6 +139,149 @@ func (s *Service) Diagnose(
 	)
 	addClockDiagnostic(&diagnosis, selected, selectedAvailable, job)
 	return diagnosis, nil
+}
+
+func (s *Service) diagnoseExtension(
+	ctx context.Context,
+	diagnosis *Diagnosis,
+	name string,
+) error {
+	extension, err := s.client.GetExtension(ctx, name)
+	switch {
+	case err == nil:
+		diagnosis.add(
+			"extension",
+			diagnosticState(extension.Value.Status.State),
+			extensionDiagnosticMessage(extension.Value),
+		)
+		return nil
+	case apierrors.IsNotFound(err):
+		diagnosis.add(
+			"extension",
+			DiagnosticError,
+			fmt.Sprintf("extension %q was not found", name),
+		)
+		return nil
+	default:
+		return fmt.Errorf("diagnose extension %q: %w", name, err)
+	}
+}
+
+func (s *Service) diagnoseInstallPlan(
+	ctx context.Context,
+	diagnosis *Diagnosis,
+	name string,
+) (*InstallPlan, error) {
+	planObject, err := s.client.GetInstallPlan(ctx, name)
+	switch {
+	case err == nil:
+	case apierrors.IsNotFound(err):
+		diagnosis.add(
+			"install-plan",
+			DiagnosticError,
+			fmt.Sprintf("InstallPlan %q was not found", name),
+		)
+		return nil, nil
+	default:
+		return nil, fmt.Errorf(
+			"diagnose extension %q InstallPlan: %w",
+			name,
+			err,
+		)
+	}
+	if err := ensurePlanIdentity(name, planObject.Value); err != nil {
+		diagnosis.add("install-plan", DiagnosticError, err.Error())
+		return nil, nil
+	}
+	return &planObject.Value, nil
+}
+
+func diagnoseInstallPlanStatus(
+	diagnosis *Diagnosis,
+	plan InstallPlan,
+	targetCluster string,
+) (InstallationStatus, bool) {
+	selected := plan.Status.InstallationStatus
+	scope := "host"
+	available := true
+	if targetCluster != "" {
+		scope = "cluster/" + targetCluster
+		selected, available = plan.Status.ClusterSchedulingStatuses[targetCluster]
+	}
+
+	if !available {
+		message := fmt.Sprintf("scope=%s; no status was found", scope)
+		if plan.Metadata.DeletionTimestamp != nil {
+			message += "; InstallPlan is deleting"
+		}
+		diagnosis.add("install-plan", DiagnosticError, message)
+		return selected, false
+	}
+
+	status := diagnosticState(selected.State)
+	message := installPlanDiagnosticMessage(scope, selected)
+	if plan.Metadata.DeletionTimestamp != nil {
+		status = DiagnosticError
+		message += "; InstallPlan is deleting"
+	}
+	diagnosis.add("install-plan", status, message)
+	return selected, true
+}
+
+func (s *Service) diagnoseVersion(
+	ctx context.Context,
+	diagnosis *Diagnosis,
+	name string,
+	targetVersion string,
+) (*Object[ExtensionVersion], error) {
+	if strings.TrimSpace(targetVersion) == "" {
+		diagnosis.add(
+			"version",
+			DiagnosticError,
+			"controller target version is not specified",
+		)
+		return nil, nil
+	}
+
+	resourceName := name + "-" + targetVersion
+	version, err := s.client.GetExtensionVersion(ctx, resourceName)
+	switch {
+	case apierrors.IsNotFound(err):
+		diagnosis.add(
+			"version",
+			DiagnosticError,
+			fmt.Sprintf(
+				"controller target ExtensionVersion resource %q was not found",
+				resourceName,
+			),
+		)
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf(
+			"diagnose extension %q ExtensionVersion %q: %w",
+			name,
+			resourceName,
+			err,
+		)
+	}
+
+	if err := ensureControllerVersionIdentity(
+		name,
+		targetVersion,
+		version.Value,
+	); err != nil {
+		diagnosis.add("version", DiagnosticError, err.Error())
+		return nil, nil
+	}
+	diagnosis.add(
+		"version",
+		DiagnosticOK,
+		fmt.Sprintf(
+			"controller target ExtensionVersion %q is available",
+			targetVersion,
+		),
+	)
+	return &version, nil
 }
 
 func diagnosticState(state string) DiagnosticStatus {
