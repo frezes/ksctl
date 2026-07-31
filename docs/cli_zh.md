@@ -73,13 +73,18 @@ ksctl kube apply -f app.yaml --cluster member-1
 
 ## 租户管理
 
-Workspace 将租户对 Namespace 和 Cluster 的访问进行分组。`tenant get` 从 KubeSphere 租户 API 读取这些关系，而不是通过 Kubernetes 资源发现读取。
+Workspace 将租户对 Namespace 和 Cluster 的访问进行分组。原生的
+`workspace`、`namespace` 和 `cluster` 形式从 KubeSphere 租户 API 读取这些关系；
+其他资源名称通过 kubectl 的资源发现、筛选和输出能力读取任意 Kubernetes 资源。
 
 | 命令 | 用途 |
 | --- | --- |
 | `ksctl tenant get workspace [NAME]` | 列出可访问的 Workspace 或显示一个 Workspace。 |
 | `ksctl tenant get namespace` | 列出 Namespace，可按 Workspace 过滤。 |
 | `ksctl tenant get cluster` | 列出 Cluster，可按 Workspace 过滤。 |
+| `ksctl tenant get TYPE [NAME]` | 在一个 Namespace 中获取任意 Kubernetes 资源。 |
+| `ksctl tenant get TYPE -A` | 跨所有有权限的 Namespace 获取资源。 |
+| `ksctl tenant get TYPE --workspace NAME` | 跨 Workspace 内的 Namespace 获取命名空间级资源。 |
 
 列出租户资源并按 Workspace 过滤：
 
@@ -89,11 +94,28 @@ ksctl tenant get workspace platform
 ksctl tenant get ns --workspace platform
 ksctl tenant get ns --workspace platform --cluster member-1
 ksctl tenant get cluster --workspace platform
+ksctl tenant get pods
+ksctl tenant get pods -A
+ksctl tenant get deployments --workspace platform
+ksctl tenant get widgets.example.io --workspace platform -o yaml
 ```
 
 可接受的名称包括 `workspace`/`workspaces`、`namespace`/`namespaces`/`ns` 和 `cluster`/`clusters`。
 
-`--workspace` 过滤 Namespace 和 Cluster 结果。`--cluster` 将 Namespace 请求路由到所选成员 Cluster，但不会更改 Workspace 或租户 Cluster 请求。输出可为 `table`、`json` 或 `yaml`。
+对于任意资源，Cluster 管理员成功执行的 `-A` 请求直接使用 Kubernetes 原生的
+全 Namespace 接口。该接口返回 `403` 时，ksctl 会解析租户可访问的 Namespace，
+以最多 8 个并发请求逐个查询，再将 List 或 Table 合并后交给 kubectl printer。
+`--workspace` 使用相同的有界查询，但只包含该 Workspace 下的 Namespace。
+
+`--workspace` 不能与 `--namespace` 或 `--all-namespaces` 同时使用，只适用于
+命名空间级资源的集合查询，也不能配合 raw 或文件输入。每个 Namespace 都必须
+成功；任一请求失败都会丢弃聚合输出，不会显示部分结果。租户跨 Namespace watch
+不受支持，watch 时请使用 `--namespace`。集群级资源不能使用 `--workspace`。
+
+对于原生租户资源，`--workspace` 仍用于过滤 Namespace 和 Cluster 结果。
+`--cluster` 会将 Namespace 和任意 Kubernetes 资源请求路由到所选成员 Cluster，
+但不会更改 Workspace 或租户 Cluster 请求。原生租户输出可为 `table`、`json`
+或 `yaml`；任意资源支持常规 kubectl get 输出格式。
 
 ## 扩展组件管理
 

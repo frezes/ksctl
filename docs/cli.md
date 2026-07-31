@@ -78,15 +78,19 @@ and behavior.
 
 ## Manage tenants
 
-A Workspace groups tenant access to Namespaces and Clusters. `tenant get`
-reads these relationships from the KubeSphere tenant API rather than Kubernetes
-resource discovery.
+A Workspace groups tenant access to Namespaces and Clusters. The native
+`workspace`, `namespace`, and `cluster` forms read these relationships from
+the KubeSphere tenant API. Other resource names use kubectl discovery,
+selection, and output behavior to read arbitrary Kubernetes resources.
 
 | Command | Purpose |
 | --- | --- |
 | `ksctl tenant get workspace [NAME]` | List accessible Workspaces or show one Workspace. |
 | `ksctl tenant get namespace` | List Namespaces, optionally filtered by Workspace. |
 | `ksctl tenant get cluster` | List Clusters, optionally filtered by Workspace. |
+| `ksctl tenant get TYPE [NAME]` | Get an arbitrary Kubernetes resource in one Namespace. |
+| `ksctl tenant get TYPE -A` | Get a resource across all authorized Namespaces. |
+| `ksctl tenant get TYPE --workspace NAME` | Get a namespaced resource across the Workspace's Namespaces. |
 
 List tenant resources and filter them by Workspace:
 
@@ -96,15 +100,34 @@ ksctl tenant get workspace platform
 ksctl tenant get ns --workspace platform
 ksctl tenant get ns --workspace platform --cluster member-1
 ksctl tenant get cluster --workspace platform
+ksctl tenant get pods
+ksctl tenant get pods -A
+ksctl tenant get deployments --workspace platform
+ksctl tenant get widgets.example.io --workspace platform -o yaml
 ```
 
 Accepted names include `workspace`/`workspaces`,
 `namespace`/`namespaces`/`ns`, and `cluster`/`clusters`.
 
-`--workspace` filters Namespace and Cluster results. `--cluster` routes
-Namespace requests through a selected member Cluster, but it does not change
-Workspace or tenant Cluster requests. Output can be `table`, `json`, or
-`yaml`.
+For arbitrary resources, a Cluster administrator's successful `-A` request
+uses the native Kubernetes all-Namespaces endpoint. If that endpoint returns
+`403`, ksctl resolves the tenant's accessible Namespaces, queries each
+Namespace with at most eight requests in flight, and merges the List or Table
+before passing it to the kubectl printer. `--workspace` performs the same
+bounded query using only that Workspace's Namespaces.
+
+`--workspace` is mutually exclusive with `--namespace` and
+`--all-namespaces`, applies only to collection queries for namespaced
+resources, and cannot be used with raw or file input. Every Namespace must
+succeed; an error discards aggregate output instead of printing a partial
+result. Tenant multi-Namespace watch is unsupported, so use `--namespace` for
+watching. Cluster-scoped resources cannot use `--workspace`.
+
+For native tenant resources, `--workspace` continues to filter Namespace and
+Cluster results. `--cluster` routes Namespace and arbitrary Kubernetes
+requests through a selected member Cluster, but it does not change Workspace
+or tenant Cluster requests. Native tenant output can be `table`, `json`, or
+`yaml`; arbitrary resources accept the normal kubectl get output formats.
 
 ## Manage extensions
 
