@@ -40,7 +40,6 @@ ksctl COMMAND --help
 
 | Group | Use it to | Commands | Availability |
 | --- | --- | --- | --- |
-| Kubernetes inspection | Read Kubernetes and discovered KubeSphere resources. | `get` | Available |
 | Kubernetes operations | Use nearly the full kubectl operation surface through KubeSphere. | `kube` | Available |
 | Tenant management | Inspect Workspaces and their Namespaces and Clusters. | `tenant` | Available |
 | Extension management | Discover, install, configure, diagnose, and remove extensions. | `extension` | Available |

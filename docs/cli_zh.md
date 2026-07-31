@@ -38,7 +38,6 @@ ksctl COMMAND --help
 
 | 分类 | 用途 | 命令 | 可用性 |
 | --- | --- | --- | --- |
-| Kubernetes 查看 | 读取 Kubernetes 资源和已发现的 KubeSphere 资源。 | `get` | 可用 |
 | Kubernetes 操作 | 通过 KubeSphere 使用基本完整的 kubectl 操作能力。 | `kube` | 可用 |
 | 租户管理 | 查看 Workspace 及其 Namespace 和 Cluster。 | `tenant` | 可用 |
 | 扩展组件管理 | 查看、安装、配置、诊断和移除扩展组件。 | `extension` | 可用 |
