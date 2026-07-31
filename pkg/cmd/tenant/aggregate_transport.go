@@ -2,6 +2,8 @@ package tenant
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,13 +12,17 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+const maxNamespaceConcurrency = 8
 
 type aggregateMode uint8
 
@@ -144,7 +150,9 @@ func (t *aggregatingRoundTripper) RoundTrip(
 		if err != nil || response.StatusCode != http.StatusForbidden {
 			return response, err
 		}
-		response.Body.Close()
+		if response.Body != nil {
+			response.Body.Close()
+		}
 		return t.aggregate(request, endpoint, mapping)
 	default:
 		return t.base.RoundTrip(request)
@@ -191,15 +199,74 @@ func (t *aggregatingRoundTripper) aggregate(
 		return nil, err
 	}
 
-	documents := make([]scopedDocument, 0, len(namespaces))
-	for _, namespace := range namespaces {
-		response, err := t.base.RoundTrip(namespaceRequest(request, endpoint, namespace))
+	documents := make([]scopedDocument, len(namespaces))
+	group, groupContext := errgroup.WithContext(request.Context())
+	group.SetLimit(maxNamespaceConcurrency)
+	for index, namespace := range namespaces {
+		index, namespace := index, namespace
+		group.Go(func() error {
+			body, err := t.fetchNamespace(
+				groupContext,
+				request,
+				endpoint,
+				namespace,
+			)
+			if err != nil {
+				return err
+			}
+			documents[index] = scopedDocument{
+				Namespace: namespace,
+				Body:      body,
+			}
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	body, err := mergeDocuments(documents, mapping, tableResponseRequested(request))
+	if err != nil {
+		return nil, err
+	}
+	return aggregatedResponse(request, body), nil
+}
+
+func (t *aggregatingRoundTripper) fetchNamespace(
+	ctx context.Context,
+	request *http.Request,
+	endpoint resourceEndpoint,
+	namespace string,
+) ([]byte, error) {
+	query := request.URL.Query()
+	pageDocuments := make([]scopedDocument, 0, 1)
+	for page := 1; ; page++ {
+		scopedRequest := namespaceRequest(ctx, request, endpoint, namespace)
+		scopedRequest.URL.RawQuery = query.Encode()
+		response, err := t.base.RoundTrip(scopedRequest)
 		if err != nil {
+			if response != nil && response.Body != nil {
+				response.Body.Close()
+			}
 			return nil, fmt.Errorf(
 				"get %s in namespace %q: %w",
 				endpoint.GVR.Resource,
 				namespace,
 				err,
+			)
+		}
+		if response == nil {
+			return nil, fmt.Errorf(
+				"get %s in namespace %q: transport returned no response",
+				endpoint.GVR.Resource,
+				namespace,
+			)
+		}
+		if response.Body == nil {
+			return nil, fmt.Errorf(
+				"get %s in namespace %q: server returned an empty response body",
+				endpoint.GVR.Resource,
+				namespace,
 			)
 		}
 		body, readErr := io.ReadAll(response.Body)
@@ -229,30 +296,78 @@ func (t *aggregatingRoundTripper) aggregate(
 				response.Status,
 			)
 		}
-		documents = append(documents, scopedDocument{
+		token, err := continueToken(body)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"decode %s response in namespace %q page %d: %w",
+				endpoint.GVR.Resource,
+				namespace,
+				page,
+				err,
+			)
+		}
+		pageDocuments = append(pageDocuments, scopedDocument{
 			Namespace: namespace,
 			Body:      body,
 		})
+		if token == "" {
+			break
+		}
+		query.Set("continue", token)
 	}
 
-	body, err := mergeDocuments(documents, mapping, tableResponseRequested(request))
+	mapping, err := t.mappingFor(endpoint.GVR)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(
+			"map %s response in namespace %q: %w",
+			endpoint.GVR.Resource,
+			namespace,
+			err,
+		)
 	}
-	return aggregatedResponse(request, body), nil
+	body, err := mergeDocuments(
+		pageDocuments,
+		mapping,
+		tableResponseRequested(request),
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"merge %s pages in namespace %q: %w",
+			endpoint.GVR.Resource,
+			namespace,
+			err,
+		)
+	}
+	return body, nil
 }
 
 func namespaceRequest(
+	ctx context.Context,
 	request *http.Request,
 	endpoint resourceEndpoint,
 	namespace string,
 ) *http.Request {
-	scoped := request.Clone(request.Context())
+	scoped := request.Clone(ctx)
 	scoped.URL = cloneURL(request.URL)
 	scoped.URL.Path = endpoint.pathForNamespace(namespace)
 	scoped.URL.RawPath = ""
 	scoped.RequestURI = ""
 	return scoped
+}
+
+func continueToken(body []byte) (string, error) {
+	var document map[string]any
+	if err := json.Unmarshal(body, &document); err != nil {
+		return "", err
+	}
+	token, found, err := unstructured.NestedString(document, "metadata", "continue")
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", nil
+	}
+	return token, nil
 }
 
 func cloneURL(source *url.URL) *url.URL {

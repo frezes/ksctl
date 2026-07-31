@@ -3,10 +3,15 @@ package tenant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -51,9 +56,14 @@ func TestAggregatingTransportKeepsSuccessfulClusterAdminRequest(t *testing.T) {
 }
 
 func TestAggregatingTransportFallsBackAfterForbidden(t *testing.T) {
-	var requests []string
+	var (
+		requestsMu sync.Mutex
+		requests   []string
+	)
 	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
 		requests = append(requests, request.URL.RequestURI())
+		requestsMu.Unlock()
 		switch request.URL.Path {
 		case "/proxy/clusters/member/api/v1/pods":
 			return jsonResponse(request, http.StatusForbidden, `{"kind":"Status"}`), nil
@@ -102,10 +112,16 @@ func TestAggregatingTransportFallsBackAfterForbidden(t *testing.T) {
 	}, []string{"team-b/pod-b", "team-a/pod-a"}; !equalStrings(got, want) {
 		t.Fatalf("items = %v, want %v", got, want)
 	}
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %v, want 3 requests", requests)
+	}
+	slices.Sort(requests[1:])
 	if got, want := requests, []string{
 		"/proxy/clusters/member/api/v1/pods?labelSelector=app%3Dweb",
-		"/proxy/clusters/member/api/v1/namespaces/team-b/pods?labelSelector=app%3Dweb",
 		"/proxy/clusters/member/api/v1/namespaces/team-a/pods?labelSelector=app%3Dweb",
+		"/proxy/clusters/member/api/v1/namespaces/team-b/pods?labelSelector=app%3Dweb",
 	}; !equalStrings(got, want) {
 		t.Fatalf("requests = %v, want %v", got, want)
 	}
@@ -366,6 +382,424 @@ func TestAggregatingRESTClientGetterDelegatesDiscoveryMapperAndLoader(t *testing
 	}
 }
 
+func TestAggregatingTransportPaginatesEachNamespaceIndependently(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		requests = make(map[string][]string)
+	)
+	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/proxy/clusters/member/api/v1/pods" {
+			return jsonResponse(request, http.StatusForbidden, `{"kind":"Status"}`), nil
+		}
+		namespace := namespaceFromPath(request.URL.Path)
+		token := request.URL.Query().Get("continue")
+		mu.Lock()
+		requests[namespace] = append(requests[namespace], token)
+		mu.Unlock()
+		switch namespace + "/" + token {
+		case "team-a/":
+			return jsonResponse(
+				request,
+				http.StatusOK,
+				pagedPodList("team-a", "pod-a1", "a-next"),
+			), nil
+		case "team-a/a-next":
+			return jsonResponse(
+				request,
+				http.StatusOK,
+				pagedPodList("team-a", "pod-a2", ""),
+			), nil
+		case "team-b/":
+			return jsonResponse(
+				request,
+				http.StatusOK,
+				pagedPodList("team-b", "pod-b1", "b-next"),
+			), nil
+		case "team-b/b-next":
+			return jsonResponse(
+				request,
+				http.StatusOK,
+				pagedPodList("team-b", "pod-b2", ""),
+			), nil
+		default:
+			return jsonResponse(request, http.StatusBadRequest, `{"kind":"Status"}`), nil
+		}
+	})
+	client := newAggregatingTestClient(
+		t,
+		base,
+		&fakeNamespaceResolver{namespaces: []string{"team-a", "team-b"}},
+		&aggregationState{mode: aggregateOnForbidden},
+	)
+
+	response, err := client.Get(
+		"https://example.test/proxy/clusters/member/api/v1/pods?limit=1",
+	)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	if got, want := podNames(t, body), []string{
+		"team-a/pod-a1",
+		"team-a/pod-a2",
+		"team-b/pod-b1",
+		"team-b/pod-b2",
+	}; !equalStrings(got, want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+	if got, want := requests["team-a"], []string{"", "a-next"}; !equalStrings(got, want) {
+		t.Fatalf("team-a continue tokens = %v, want %v", got, want)
+	}
+	if got, want := requests["team-b"], []string{"", "b-next"}; !equalStrings(got, want) {
+		t.Fatalf("team-b continue tokens = %v, want %v", got, want)
+	}
+	var metadata struct {
+		Metadata struct {
+			Continue string `json:"continue"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &metadata); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if metadata.Metadata.Continue != "" {
+		t.Fatalf("aggregate continue = %q, want empty", metadata.Metadata.Continue)
+	}
+}
+
+func TestAggregatingTransportLimitsNamespaceConcurrency(t *testing.T) {
+	namespaces := make([]string, 10)
+	for index := range namespaces {
+		namespaces[index] = "team-" + string(rune('a'+index))
+	}
+	var current atomic.Int32
+	var maximum atomic.Int32
+	started := make(chan struct{}, len(namespaces))
+	release := make(chan struct{})
+	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/proxy/clusters/member/api/v1/pods" {
+			return jsonResponse(request, http.StatusForbidden, `{"kind":"Status"}`), nil
+		}
+		inFlight := current.Add(1)
+		for {
+			observed := maximum.Load()
+			if inFlight <= observed || maximum.CompareAndSwap(observed, inFlight) {
+				break
+			}
+		}
+		started <- struct{}{}
+		<-release
+		current.Add(-1)
+		namespace := namespaceFromPath(request.URL.Path)
+		return jsonResponse(request, http.StatusOK, podList(namespace, "pod")), nil
+	})
+	client := newAggregatingTestClient(
+		t,
+		base,
+		&fakeNamespaceResolver{namespaces: namespaces},
+		&aggregationState{mode: aggregateOnForbidden},
+	)
+	done := make(chan error, 1)
+	go func() {
+		response, err := client.Get(
+			"https://example.test/proxy/clusters/member/api/v1/pods",
+		)
+		if response != nil {
+			response.Body.Close()
+		}
+		done <- err
+	}()
+
+	startedCount := 0
+	timer := time.NewTimer(time.Second)
+	for startedCount < maxNamespaceConcurrency {
+		select {
+		case <-started:
+			startedCount++
+		case <-timer.C:
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			t.Fatalf(
+				"concurrent starts = %d, want %d",
+				startedCount,
+				maxNamespaceConcurrency,
+			)
+		}
+	}
+	if !timer.Stop() {
+		<-timer.C
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got := maximum.Load(); got <= 1 || got > maxNamespaceConcurrency {
+		t.Fatalf(
+			"maximum concurrency = %d, want > 1 and <= %d",
+			got,
+			maxNamespaceConcurrency,
+		)
+	}
+}
+
+func TestAggregatingTransportPreservesNamespaceOrderAcrossCompletionOrder(t *testing.T) {
+	namespaces := []string{"team-a", "team-b", "team-c"}
+	started := make(chan string, len(namespaces))
+	gates := map[string]chan struct{}{
+		"team-a": make(chan struct{}),
+		"team-b": make(chan struct{}),
+		"team-c": make(chan struct{}),
+	}
+	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/proxy/clusters/member/api/v1/pods" {
+			return jsonResponse(request, http.StatusForbidden, `{"kind":"Status"}`), nil
+		}
+		namespace := namespaceFromPath(request.URL.Path)
+		started <- namespace
+		<-gates[namespace]
+		return jsonResponse(request, http.StatusOK, podList(namespace, "pod")), nil
+	})
+	client := newAggregatingTestClient(
+		t,
+		base,
+		&fakeNamespaceResolver{namespaces: namespaces},
+		&aggregationState{mode: aggregateOnForbidden},
+	)
+	type result struct {
+		body []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		response, err := client.Get(
+			"https://example.test/proxy/clusters/member/api/v1/pods",
+		)
+		if err != nil {
+			done <- result{err: err}
+			return
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		done <- result{body: body, err: err}
+	}()
+
+	seen := make(map[string]bool, len(namespaces))
+	timer := time.NewTimer(time.Second)
+	for len(seen) < len(namespaces) {
+		select {
+		case namespace := <-started:
+			seen[namespace] = true
+		case <-timer.C:
+			for _, gate := range gates {
+				close(gate)
+			}
+			<-done
+			t.Fatalf("started namespaces = %v, want all %v", seen, namespaces)
+		}
+	}
+	if !timer.Stop() {
+		<-timer.C
+	}
+	close(gates["team-c"])
+	close(gates["team-b"])
+	close(gates["team-a"])
+	outcome := <-done
+	if outcome.err != nil {
+		t.Fatalf("Get() error = %v", outcome.err)
+	}
+	if got, want := podNames(t, outcome.body), []string{
+		"team-a/pod",
+		"team-b/pod",
+		"team-c/pod",
+	}; !equalStrings(got, want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+}
+
+func TestAggregatingTransportCancelsPeersAndClosesBodiesOnNamespaceError(t *testing.T) {
+	blockedStarted := make(chan struct{})
+	peerCancelled := make(chan struct{})
+	forceRelease := make(chan struct{})
+	var bodiesMu sync.Mutex
+	var bodies []*trackingReadCloser
+	newBody := func(value string) *trackingReadCloser {
+		body := &trackingReadCloser{Reader: strings.NewReader(value)}
+		bodiesMu.Lock()
+		bodies = append(bodies, body)
+		bodiesMu.Unlock()
+		return body
+	}
+	base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/proxy/clusters/member/api/v1/pods" {
+			response := jsonResponse(request, http.StatusForbidden, `{"kind":"Status"}`)
+			response.Body = newBody(`{"kind":"Status"}`)
+			return response, nil
+		}
+		switch namespaceFromPath(request.URL.Path) {
+		case "team-a":
+			close(blockedStarted)
+			select {
+			case <-request.Context().Done():
+				close(peerCancelled)
+				return nil, request.Context().Err()
+			case <-forceRelease:
+				return jsonResponse(request, http.StatusOK, podList("team-a", "pod-a")), nil
+			}
+		case "team-b":
+			<-blockedStarted
+			response := jsonResponse(
+				request,
+				http.StatusInternalServerError,
+				`{"kind":"Status"}`,
+			)
+			response.Body = newBody(`{"kind":"Status"}`)
+			return response, nil
+		default:
+			return nil, errors.New("unexpected namespace")
+		}
+	})
+	state := &aggregationState{mode: aggregateOnForbidden}
+	client := newAggregatingTestClient(
+		t,
+		base,
+		&fakeNamespaceResolver{namespaces: []string{"team-a", "team-b"}},
+		state,
+	)
+	done := make(chan error, 1)
+	go func() {
+		response, err := client.Get(
+			"https://example.test/proxy/clusters/member/api/v1/pods",
+		)
+		if response != nil {
+			response.Body.Close()
+		}
+		done <- err
+	}()
+
+	select {
+	case <-peerCancelled:
+	case <-time.After(time.Second):
+		close(forceRelease)
+		<-done
+		t.Fatal("blocked namespace did not observe context cancellation")
+	}
+	err := <-done
+	if err == nil || !strings.Contains(err.Error(), `namespace "team-b"`) {
+		t.Fatalf("Get() error = %v, want team-b failure", err)
+	}
+	if !state.used.Load() {
+		t.Fatal("aggregation state used = false, want true")
+	}
+	bodiesMu.Lock()
+	defer bodiesMu.Unlock()
+	for index, body := range bodies {
+		if !body.closed.Load() {
+			t.Fatalf("response body %d was not closed", index)
+		}
+	}
+}
+
+func TestAggregatingTransportReportsNamespaceErrorsAndClosesBodies(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		secondPage bool
+	}{
+		{name: "forbidden", status: http.StatusForbidden, body: `{"kind":"Status"}`},
+		{name: "not found", status: http.StatusNotFound, body: `{"kind":"Status"}`},
+		{name: "rate limited", status: http.StatusTooManyRequests, body: `{"kind":"Status"}`},
+		{
+			name:   "server error",
+			status: http.StatusInternalServerError,
+			body:   `{"kind":"Status"}`,
+		},
+		{name: "malformed JSON", status: http.StatusOK, body: `{`},
+		{
+			name:       "failing second page",
+			status:     http.StatusInternalServerError,
+			body:       `{"kind":"Status"}`,
+			secondPage: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var (
+				mu     sync.Mutex
+				bodies []*trackingReadCloser
+			)
+			responseWithTrackedBody := func(
+				request *http.Request,
+				status int,
+				value string,
+			) *http.Response {
+				body := &trackingReadCloser{Reader: strings.NewReader(value)}
+				mu.Lock()
+				bodies = append(bodies, body)
+				mu.Unlock()
+				response := jsonResponse(request, status, value)
+				response.Body = body
+				return response
+			}
+			base := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Path == "/proxy/clusters/member/api/v1/pods" {
+					return responseWithTrackedBody(
+						request,
+						http.StatusForbidden,
+						`{"kind":"Status"}`,
+					), nil
+				}
+				if test.secondPage && request.URL.Query().Get("continue") == "" {
+					return responseWithTrackedBody(
+						request,
+						http.StatusOK,
+						pagedPodList("team-a", "pod-a", "next"),
+					), nil
+				}
+				return responseWithTrackedBody(
+					request,
+					test.status,
+					test.body,
+				), nil
+			})
+			state := &aggregationState{mode: aggregateOnForbidden}
+			client := newAggregatingTestClient(
+				t,
+				base,
+				&fakeNamespaceResolver{namespaces: []string{"team-a"}},
+				state,
+			)
+
+			response, err := client.Get(
+				"https://example.test/proxy/clusters/member/api/v1/pods",
+			)
+			if response != nil {
+				response.Body.Close()
+				t.Fatalf("Get() response = %#v, want nil", response)
+			}
+			if err == nil || !strings.Contains(err.Error(), `namespace "team-a"`) {
+				t.Fatalf("Get() error = %v, want team-a failure", err)
+			}
+			if !state.used.Load() {
+				t.Fatal("aggregation state used = false, want true")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for index, body := range bodies {
+				if !body.closed.Load() {
+					t.Fatalf("response body %d was not closed", index)
+				}
+			}
+		})
+	}
+}
+
 func newAggregatingTestClient(
 	t *testing.T,
 	base http.RoundTripper,
@@ -476,10 +910,14 @@ func jsonResponse(
 }
 
 func podList(namespace, name string) string {
+	return pagedPodList(namespace, name, "")
+}
+
+func pagedPodList(namespace, name, token string) string {
 	return `{
 		"apiVersion":"v1",
 		"kind":"PodList",
-		"metadata":{"continue":"","resourceVersion":"1"},
+		"metadata":{"continue":` + quoteJSON(token) + `,"resourceVersion":"1"},
 		"items":[{"apiVersion":"v1","kind":"Pod","metadata":{
 			"namespace":` + quoteJSON(namespace) + `,
 			"name":` + quoteJSON(name) + `
@@ -490,6 +928,44 @@ func podList(namespace, name string) string {
 func quoteJSON(value string) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
+}
+
+func podNames(t *testing.T, body []byte) []string {
+	t.Helper()
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Namespace string `json:"namespace"`
+				Name      string `json:"name"`
+			} `json:"metadata"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	names := make([]string, len(list.Items))
+	for index, item := range list.Items {
+		names[index] = item.Metadata.Namespace + "/" + item.Metadata.Name
+	}
+	return names
+}
+
+func namespaceFromPath(path string) string {
+	remaining := strings.SplitN(path, "/namespaces/", 2)
+	if len(remaining) != 2 {
+		return ""
+	}
+	return strings.SplitN(remaining[1], "/", 2)[0]
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed atomic.Bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed.Store(true)
+	return nil
 }
 
 func equalStrings(left, right []string) bool {
