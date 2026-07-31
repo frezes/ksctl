@@ -6,8 +6,8 @@
 
 `ksctl` is a command-line client for KubeSphere 4.x. It connects to a
 KubeSphere Endpoint to inspect resources and manage KubeSphere extensions.
-The `kube` command suite provides kubectl-compatible Kubernetes operations
-through KubeSphere authentication and supports cross-Cluster routing through
+The `kube` command provides nearly the full kubectl operation surface through
+KubeSphere authentication and supports cross-Cluster routing through
 `--cluster`. Tenant commands show how resources accessible to the current
 tenant are distributed across Workspaces, Namespaces, and Clusters.
 
@@ -20,7 +20,6 @@ Before you begin, you need:
 - A reachable KubeSphere 4.x API Endpoint.
 - A KubeSphere account or bearer Token.
 - The `ksctl` executable.
-- Metrics Server in a Cluster where you want to use `top`.
 
 ## Command syntax
 
@@ -42,7 +41,7 @@ ksctl COMMAND --help
 | Group | Use it to | Commands | Availability |
 | --- | --- | --- | --- |
 | Kubernetes inspection | Read Kubernetes and discovered KubeSphere resources. | `get` | Available |
-| Kubernetes operations | Read, mutate, debug, stream, and manage Kubernetes resources. | `kube` | Available |
+| Kubernetes operations | Use nearly the full kubectl operation surface through KubeSphere. | `kube` | Available |
 | Tenant management | Inspect Workspaces and their Namespaces and Clusters. | `tenant` | Available |
 | Extension management | Discover, install, configure, diagnose, and remove extensions. | `extension` | Available |
 | Application management | Manage KubeSphere applications. | — | Not yet available |
@@ -50,15 +49,10 @@ ksctl COMMAND --help
 
 ## Manage Kubernetes resources
 
-Top-level `get` remains a concise read-only path. The `kube` namespace exposes
-the complete kubectl v0.36.2 Kubernetes operation set while using ksctl
-credentials and Cluster routing. This guide assumes familiarity with kubectl
-and highlights only ksctl-specific scope selection.
-
-> **Breaking change:** `describe`, `logs`, and `top` now run only under
-> `ksctl kube`. The former top-level paths are removed. `--request-timeout`
-> also moved from the root to `ksctl kube`, while `--cluster` remains a ksctl
-> root flag inherited by all `kube` operations.
+Top-level `ksctl get` is a concise, read-only entry point for Kubernetes and
+discovered KubeSphere resources. `ksctl kube` provides nearly the full kubectl
+operation surface while using ksctl connection, authentication, Context, and
+Cluster selection.
 
 ### Select the resource scope
 
@@ -69,84 +63,19 @@ and highlights only ksctl-specific scope selection.
 | Namespace | Selects a Kubernetes Namespace or KubeSphere Project. |
 | Workspace | Represents the tenant scope used to inspect accessible Namespaces and Clusters. |
 
-### Inspect resources
-
-| Command | Purpose |
-| --- | --- |
-| `ksctl get TYPE [NAME]` | Display one or more resources through the read-only top-level path. |
-| `ksctl kube describe TYPE [NAME_PREFIX]` | Display detailed state and related information. |
-| `ksctl kube logs (POD \| TYPE/NAME)` | Print container logs. |
-| `ksctl kube top (pod \| node) [NAME]` | Display current CPU and memory usage. |
-
-Use `get` for lists, structured output, and scripts:
+Use the saved Context or override its scope for one command:
 
 ```bash
 ksctl get deployments,pods -n demo --cluster member-1
-ksctl get pods -n demo -l app=web -o wide
-ksctl get pod web-0 -n demo -o yaml
+ksctl kube apply -f app.yaml --cluster member-1
 ```
 
-Use `describe` for human-readable details and related information:
-
-```bash
-ksctl kube describe deployment web -n demo
-ksctl kube describe pod/web-0 -n demo --cluster member-1
-```
-
-Accepted singular, plural, short, versioned, and group-qualified resource names
-depend on server discovery. `describe` does not support structured `-o` output;
-use `get` when another output format is required.
-
-### Read container logs
-
-Read a Pod directly or let the command resolve a workload to its Pods:
-
-```bash
-ksctl kube logs pod/web-0 -n demo
-ksctl kube logs deployment/web -n demo --all-pods
-```
-
-The command reads logs from the selected Cluster through the KubeSphere
-Endpoint. It does not search a logging extension. Logs can contain sensitive
-data, so protect terminal captures and redirected files.
-
-### View current resource usage
-
-`top` reads recent CPU and memory signals from
-`metrics.k8s.io/v1beta1`:
-
-```bash
-ksctl kube top pod -n demo --sort-by=cpu
-ksctl kube top pod web-0 -n demo --containers
-ksctl kube top node --cluster member-1
-```
-
-Metrics Server must be available in the selected Cluster. The values are
-current autoscaling signals, not historical monitoring data; ksctl does not
-fall back to a KubeSphere monitoring extension.
-
-### Run the complete operation suite
-
-| Category | `kube` commands |
-| --- | --- |
-| Basic | `create`, `expose`, `run`, `set`, `explain`, `get`, `edit`, `delete` |
-| Deployment | `rollout`, `scale`, `autoscale` |
-| Cluster management | `certificate`, `cluster-info`, `top`, `cordon`, `uncordon`, `drain`, `taint` |
-| Troubleshooting | `describe`, `logs`, `attach`, `exec`, `port-forward`, `proxy`, `cp`, `auth`, `debug`, `events` |
-| Advanced | `diff`, `apply`, `patch`, `replace`, `wait`, `kustomize` |
-| Settings and discovery | `label`, `annotate`, `api-versions`, `api-resources` |
-
-Every remote `kube` operation inherits the root `--cluster` flag. Commands
-such as `apply`, `delete`, `drain`, `debug`, and `rollout` may change the
-selected Cluster and are subject to Kubernetes RBAC for the resolved
-KubeSphere credential. ksctl preserves upstream kubectl write behavior and
-does not add an extra confirmation step.
-
-The `kube` namespace excludes kubectl's kubeconfig and CLI self-management
-commands: `config`, `plugin`, `version`, `completion`, `options`, `kuberc`, and
-empty `alpha`. It does not read or write `~/.kube/config`. Use
+`kube` does not read or write `~/.kube/config`; use
 `ksctl config generate kubeconfig` when you explicitly need a kubeconfig.
-The release companion exposes the same operations as `unictl ks kube ...`.
+Mutating operations use the resolved KubeSphere credential's Kubernetes RBAC
+permissions and receive no additional confirmation from ksctl. Use
+`ksctl kube --help` and the upstream kubectl documentation for operation syntax
+and behavior.
 
 ## Manage tenants
 
@@ -372,8 +301,6 @@ ksctl tenant get workspace
 ksctl tenant get ns --workspace demo
 ksctl tenant get cluster --workspace demo
 ksctl get deployments,pods -n demo --cluster member-1
-ksctl kube logs deployment/web -n demo --all-pods --cluster member-1
-ksctl kube top pod -n demo --cluster member-1
 ```
 
 ### Administrator workflow
@@ -406,9 +333,3 @@ ksctl api /kapis/version
   connection.
 - Avoid `ksctl config view --raw` during routine troubleshooting because it can
   reveal credentials and TLS private key data.
-
-### Metrics API not available
-
-`top` requires Metrics Server and a discoverable
-`metrics.k8s.io/v1beta1` APIService in the selected Cluster. Verify the
-Metrics Server deployment, APIService availability, and `--cluster` value.
